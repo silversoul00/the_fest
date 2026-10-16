@@ -24,6 +24,7 @@ export default function ScannerLogin() {
             <input className="input" type="password" name="password" autoComplete="current-password" required />
           </label>
           <Submit className="btn block green" pendingText="Unlocking…">Unlock scanner →</Submit>
+          <Link href="/forgot-password" className="xs muted" style={{ textAlign: 'center' }}>Forgot password?</Link>
         </ActionForm>
         <p className="small soft" style={{ textAlign: 'center' }}>No account? <Link className="c-green" href="/signup?next=/scan/login">Sign up</Link> with the email you were added with.</p>
       </div>

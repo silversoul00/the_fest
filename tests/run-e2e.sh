@@ -33,6 +33,7 @@ ffmpeg -loglevel error -y -loop 1 -i "$E2E_DIR/qr.png" -vf "scale=640:640,format
 python3 tests/e2e.py
 python3 tests/upi.py
 python3 tests/refunds.py
+python3 tests/password.py
 
 # Race tests on fresh rows
 export RACE_FEST=$(eval "$PSQL" -c "\"select id from fests where slug='neon-utsav'\"")

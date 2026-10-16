@@ -29,6 +29,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <input className="input" type="password" name="password" autoComplete="current-password" required placeholder="••••••••" />
           </label>
           <Submit pendingText="Signing in…">Log in →</Submit>
+          <Link href="/forgot-password" className="xs muted" style={{ textAlign: 'center' }}>Forgot password?</Link>
         </ActionForm>
         <div className="stack g8 small soft" style={{ textAlign: 'center' }}>
           <span>New here? <Link className="accent" href={`/signup${next ? `?next=${encodeURIComponent(next)}` : ''}`}>Create an account</Link></span>
