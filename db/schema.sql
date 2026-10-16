@@ -256,7 +256,14 @@ alter table fests   add column if not exists allow_transfers boolean not null de
 
 -- v2.2: email verification. Access granted by email (co-organizer, gate staff, sponsor, ADMIN_EMAILS)
 -- only counts once the account has proved it owns that inbox.
-alter table users add column if not exists email_verified_at timestamptz;
+-- Accounts that existed before verification was introduced are treated as verified (one-time
+-- backfill, runs only when the column is first added) so live volunteers and sponsors keep access.
+do $$ begin
+  if not exists (select 1 from information_schema.columns where table_name = 'users' and column_name = 'email_verified_at') then
+    alter table users add column email_verified_at timestamptz;
+    update users set email_verified_at = now();
+  end if;
+end $$;
 create table if not exists email_verifications (
   token_hash  text primary key,
   user_id     uuid not null references users(id) on delete cascade,
@@ -332,4 +339,6 @@ alter table email_outbox    enable row level security;
 
 -- v2.1: refund tracking (manual_pending = organizer must send UPI back; failed = gateway refund failed, retry)
 alter table orders add column if not exists refund_status text check (refund_status in ('done', 'manual_pending', 'failed', 'processing'));
+-- Set while an admin retry of a failed gateway refund is in flight (claim, so two retries can't both pay)
+alter table orders add column if not exists refund_retry_at timestamptz;
 alter table orders add column if not exists refund_failed_paise int not null default 0;  -- gateway refund amount awaiting retry

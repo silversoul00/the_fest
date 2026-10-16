@@ -69,6 +69,8 @@ async def main():
         await org.click('button:has-text("Match payments")'); await org.wait_for_selector('text=need a look')
         row = q(f"select status, review_flag, (select count(*) from tickets where order_id = o.id) from orders o where id = '{late}'").split('|')
         check('payment after cancellation issues no ticket and is flagged for refund', row[0] != 'paid' and 'cancelled' in (row[1] or '') and row[2] == '0', row)
+        await org.goto(f'{B}/organizer/{cid}/sales')
+        check('late UPI payment appears in "UPI refunds to send"', await org.locator('.card:has-text("UPI refunds to send")', has_text='700000000001').count() == 1)
         pub = await st.goto(B + '/fests/commerce-carnival')
         check('public page shows cancellation', await st.locator('text=This fest was cancelled').count() == 1)
         check('cancelled fest hidden from discover', 'Commerce Carnival' not in await (await st.goto(B + '/fests')).text())

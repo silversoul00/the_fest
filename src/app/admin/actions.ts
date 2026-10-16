@@ -5,7 +5,7 @@ import { sql } from '@/lib/db';
 import { isUuid } from '@/lib/http';
 import { sendEmail } from '@/lib/mail';
 import type { ActionState } from '@/lib/types';
-import { retryRefund } from '@/lib/refunds';
+import { refundUnfulfilled, retryRefund } from '@/lib/refunds';
 
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
 const site = () => process.env.NEXT_PUBLIC_SITE_URL ?? '';
@@ -55,5 +55,13 @@ export async function retryRefundAction(fd: FormData) {
   const id = s(fd, 'orderId');
   if (!isUuid(id)) return;
   try { await retryRefund(id); } catch (e) { console.error('retry refund failed', e); }
+  revalidatePath('/admin', 'layout');
+}
+
+export async function refundUnfulfilledAction(fd: FormData) {
+  await requireAdmin();
+  const id = s(fd, 'orderId');
+  if (!isUuid(id)) return;
+  try { await refundUnfulfilled(id); } catch (e) { console.error('refund failed', e); }
   revalidatePath('/admin', 'layout');
 }

@@ -94,24 +94,58 @@ export async function cancelFest(festId: string, reason: string) {
  */
 export async function retryRefund(orderId: string) {
   const [o] = await sql<{ provider: string; refunded_paise: number; refund_failed_paise: number; razorpay_payment_id: string | null }[]>`
-    update orders set refund_status = 'processing'
-    where id = ${orderId} and refund_status = 'failed' and refund_failed_paise > 0
+    update orders set refund_retry_at = now()
+    where id = ${orderId} and refund_failed_paise > 0
+      and (refund_retry_at is null or refund_retry_at < now() - interval '10 minutes')
     returning provider, refunded_paise, refund_failed_paise, razorpay_payment_id`;
   if (!o) throw new OrderError('Nothing to retry (or a retry is already running).');
+  const claimed = o.refund_failed_paise;
   try {
     let already: number;
     if (o.provider === 'cashfree') already = await cashfreeRefundedTotal(orderId);
     else if (o.provider === 'razorpay' && o.razorpay_payment_id) already = await razorpayRefundedTotal(o.razorpay_payment_id);
     else throw new OrderError('This payment can’t be refunded through a gateway.');
-    const due = Math.min(o.refund_failed_paise, o.refunded_paise - already);
+    const due = Math.min(claimed, o.refunded_paise - already);
     if (due > 0) {
-      if (o.provider === 'cashfree') await refundCashfree(orderId, due, cashfreeRefundId(orderId, o.refunded_paise), 'Ticket cancelled');
+      if (o.provider === 'cashfree') await refundCashfree(orderId, due, `rr${orderId.replace(/-/g, '')}${o.refunded_paise.toString(36)}`.slice(0, 40), 'Ticket cancelled');
       else await refundRazorpay(o.razorpay_payment_id!, due, 'Ticket cancelled');
     }
-    await sql`update orders set refund_status = 'done', refund_failed_paise = 0, review_flag = null where id = ${orderId}`;
+    // Only clear what this retry covered — a refund that failed meanwhile stays visible
+    await sql`update orders set
+        refund_failed_paise = greatest(refund_failed_paise - ${claimed}, 0),
+        refund_status = case when refund_failed_paise - ${claimed} > 0 then 'failed' else 'done' end,
+        review_flag = case when refund_failed_paise - ${claimed} > 0 then review_flag else null end,
+        refund_retry_at = null
+      where id = ${orderId}`;
     return { sent: Math.max(due, 0) };
   } catch (e) {
-    await sql`update orders set refund_status = 'failed' where id = ${orderId} and refund_status = 'processing'`;
+    await sql`update orders set refund_retry_at = null where id = ${orderId}`;
     throw e;
+  }
+}
+
+/**
+ * Admin: refund a card/UPI-checkout payment that arrived but couldn't become a ticket
+ * (fest cancelled or sold out by then). The order never became "paid", so refundOrder can't.
+ */
+export async function refundUnfulfilled(orderId: string) {
+  const [o] = await sql<{ provider: string; amount_paise: number; razorpay_payment_id: string | null }[]>`
+    update orders set refund_status = 'processing', refunded_paise = amount_paise, refunded_at = now(),
+                      refund_note = review_flag
+    where id = ${orderId} and status <> 'paid' and review_flag like '%refund needed' and refund_status is null
+      and provider in ('cashfree', 'razorpay')
+    returning provider, amount_paise, razorpay_payment_id`;
+  if (!o) throw new OrderError('Nothing to refund here.');
+  try {
+    if (o.provider === 'cashfree') await refundCashfree(orderId, o.amount_paise, cashfreeRefundId(orderId, o.amount_paise), 'Payment could not be used');
+    else if (o.razorpay_payment_id) await refundRazorpay(o.razorpay_payment_id, o.amount_paise, 'Payment could not be used');
+    else throw new Error('No payment id');
+    await sql`update orders set refund_status = 'done', review_flag = null where id = ${orderId}`;
+    notifyRefund(orderId, o.amount_paise, 'Your payment arrived after tickets could no longer be issued').catch(() => {});
+  } catch (e) {
+    console.error('refund failed', orderId, e);
+    await sql`update orders set refund_status = 'failed', refund_failed_paise = ${o.amount_paise},
+                review_flag = 'Refund failed at payment gateway — retry from admin' where id = ${orderId}`;
+    throw new OrderError('The gateway refused the refund — it’s flagged to retry.');
   }
 }

@@ -3,7 +3,7 @@ import { sql } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth';
 import { ago, rupees } from '@/lib/format';
 import { Empty } from '@/components/ui';
-import { retryRefundAction } from '../actions';
+import { refundUnfulfilledAction, retryRefundAction } from '../actions';
 
 export default async function AdminOrders({ searchParams }: { searchParams: Promise<{ q?: string; flagged?: string }> }) {
   // Every admin page checks for itself: layouts don't run on client-side navigation requests.
@@ -46,7 +46,10 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
                 <td className="num">{rupees(o.amount_paise)}{o.refunded_paise > 0 && <div className="xs c-orange">−{rupees(o.refunded_paise)} refunded</div>}</td>
                 <td><span className={`badge ${o.status === 'paid' ? 'green' : o.status === 'refunded' ? 'orange' : o.status === 'pending' ? 'yellow' : 'gray'}`}>{o.status}</span>
                   {o.review_flag && <div className="xs c-orange">{o.review_flag}</div>}
-                  {o.refund_status === 'failed' && (
+                  {o.status !== 'paid' && !o.refund_status && (o.provider === 'cashfree' || o.provider === 'razorpay') && o.review_flag?.endsWith('refund needed') && (
+                    <form action={refundUnfulfilledAction} className="mt8"><input type="hidden" name="orderId" value={o.id} /><button className="btn sm orange">Refund {rupees(o.amount_paise)} payment</button></form>
+                  )}
+                  {o.refund_failed_paise > 0 && (
                     <form action={retryRefundAction} className="mt8"><input type="hidden" name="orderId" value={o.id} /><button className="btn sm orange">Retry {rupees(o.refund_failed_paise)} refund</button></form>
                   )}
                   {o.refund_status === 'manual_pending' && <div className="xs c-blue">UPI refund to send</div>}</td>

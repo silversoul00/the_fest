@@ -71,16 +71,18 @@ export async function createOrder(input: { userId: string; ticketTypeId: string;
       // Tag the amount with a few paise so each open UPI order has a unique
       // amount (₹270.37). Lets the app match bank credits even if the student
       // mistypes the UTR. Fest-level lock prevents two orders picking the same tag.
-      // A tag stays reserved for 7 days whatever happened to the order, so a late or
-      // repeated bank alert for an old order can never match a newer one. Max ₹9.99 extra.
+      // A tag stays reserved for 7 days while the order is open or expired (a late payment can
+      // still arrive), and for 1 day after it's paid (repeat alerts for the same payment), so an
+      // old alert can never match a newer order. Max ₹19.99 extra.
       await tx`select pg_advisory_xact_lock(hashtext(${tt.fest_id}))`;
       const taken = new Set((await tx<{ a: number }[]>`
         select amount_paise as a from orders
         where fest_id = ${tt.fest_id} and method = 'upi_direct'
-          and created_at > now() - interval '7 days'`).map((r) => r.a));
+          and created_at > now() - interval '7 days'
+          and (status not in ('paid', 'refunded') or paid_at > now() - interval '1 day')`).map((r) => r.a));
       let k = 1;
-      while (taken.has(amount + k) && k <= 999) k++;
-      if (k > 999) throw new OrderError('Too many UPI payments at this price this week. Use card/UPI checkout.');
+      while (taken.has(amount + k) && k <= 1999) k++;
+      if (k > 1999) throw new OrderError('Too many UPI payments at this price right now. Use card/UPI checkout.');
       amount += k;
     }
 
@@ -122,9 +124,17 @@ export async function fulfilOrder(orderId: string, payment?: { provider: Provide
     // Money arrived but no ticket can be issued: keep the order unpaid, remember the payment,
     // and flag it for a refund. (Returned, not thrown, so the flag is actually saved.)
     const needsRefund = async (reason: string) => {
+      const upi = payment?.provider === 'upi_direct';
       await tx`update orders set review_flag = ${reason},
+                 provider = coalesce(${payment?.provider ?? null}, provider),
                  payment_ref = coalesce(${payment?.paymentId ?? null}, payment_ref),
-                 verify_source = coalesce(${payment?.verifySource ?? null}, verify_source)
+                 razorpay_payment_id = case when ${payment?.provider ?? null} = 'razorpay' then ${payment?.paymentId ?? null} else razorpay_payment_id end,
+                 verify_source = coalesce(${payment?.verifySource ?? null}, verify_source),
+                 -- bank UPI: the money is in the fest's account, so it goes on the organizer's send-back list
+                 refunded_paise = case when ${upi} then amount_paise else refunded_paise end,
+                 refund_status = case when ${upi} then 'manual_pending' else refund_status end,
+                 refunded_at = case when ${upi} then now() else refunded_at end,
+                 refund_note = case when ${upi} then ${reason} else refund_note end
                where id = ${orderId}`;
       return { refundNeeded: reason };
     };

@@ -12,7 +12,7 @@ export default async function Sales({ params, searchParams }: { params: Promise<
   const { q = '' } = await searchParams;
   const like = q.trim() ? `%${q.trim()}%` : null;
 
-  const [byType, orders] = await Promise.all([
+  const [byType, orders, toSend] = await Promise.all([
     sql<{ name: string; qty: number; gross: number; fees: number }[]>`
       select tt.name, (select count(*) from tickets t where t.ticket_type_id = tt.id and t.status <> 'void')::int qty,
              coalesce(sum(o.amount_paise - o.refunded_paise), 0)::int gross, coalesce(sum(o.platform_fee_paise + o.gateway_fee_paise), 0)::int fees
@@ -26,6 +26,11 @@ export default async function Sales({ params, searchParams }: { params: Promise<
       where o.fest_id = ${fest.id} and o.status in ('paid', 'refunded')
         ${like ? sql`and (u.name ilike ${like} or u.email ilike ${like} or u.college ilike ${like})` : sql``}
       order by o.paid_at desc limit 200`,
+    // Bank-UPI money to send back: refunds, and payments that arrived too late to become tickets
+    sql<{ id: string; name: string; email: string; utr: string | null; refunded_paise: number }[]>`
+      select o.id, u.name, u.email::text, o.utr, o.refunded_paise
+      from orders o join users u on u.id = o.user_id
+      where o.fest_id = ${fest.id} and o.refund_status = 'manual_pending' order by o.refunded_at`,
   ]);
 
   const totals = byType.reduce((a, t) => ({ qty: a.qty + t.qty, gross: a.gross + t.gross, fees: a.fees + t.fees }), { qty: 0, gross: 0, fees: 0 });
@@ -54,11 +59,11 @@ export default async function Sales({ params, searchParams }: { params: Promise<
         </table>
       </div>
 
-      {orders.some((o) => o.refund_status === 'manual_pending') && (
+      {toSend.length > 0 && (
         <div className="card stack g8" style={{ borderColor: 'rgba(56,189,248,.35)' }}>
           <div className="h3">UPI refunds to send</div>
           <p className="xs muted">These students paid your fest’s UPI directly. Send the amount back from your bank app (to the UPI ID that paid, found by its UTR), then mark it sent.</p>
-          {orders.filter((o) => o.refund_status === 'manual_pending').map((o) => (
+          {toSend.map((o) => (
             <div key={o.id} className="row wrap-row g12 small">
               <span className="grow">{o.name} · {o.email} · UTR <span className="mono">{o.utr ?? '—'}</span></span>
               <span className="mono">{rupees(o.refunded_paise)}</span>
