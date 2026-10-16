@@ -71,14 +71,16 @@ export async function createOrder(input: { userId: string; ticketTypeId: string;
       // Tag the amount with a few paise so each open UPI order has a unique
       // amount (₹270.37). Lets the app match bank credits even if the student
       // mistypes the UTR. Fest-level lock prevents two orders picking the same tag.
+      // A tag stays reserved for 7 days whatever happened to the order, so a late or
+      // repeated bank alert for an old order can never match a newer one. Max ₹9.99 extra.
       await tx`select pg_advisory_xact_lock(hashtext(${tt.fest_id}))`;
       const taken = new Set((await tx<{ a: number }[]>`
         select amount_paise as a from orders
-        where fest_id = ${tt.fest_id} and method = 'upi_direct' and status = 'pending'
+        where fest_id = ${tt.fest_id} and method = 'upi_direct'
           and created_at > now() - interval '7 days'`).map((r) => r.a));
       let k = 1;
-      while (taken.has(amount + k) && k < 9999) k++;
-      if (k >= 9999) throw new OrderError('Too many unconfirmed UPI payments right now. Use card/UPI checkout.');
+      while (taken.has(amount + k) && k <= 999) k++;
+      if (k > 999) throw new OrderError('Too many UPI payments at this price this week. Use card/UPI checkout.');
       amount += k;
     }
 
@@ -110,20 +112,31 @@ async function releaseExpiredHolds(tx: postgres.TransactionSql, ticketTypeId: st
  * (checkout callback + webhook, or two matching bank credits) issues tickets once.
  */
 export async function fulfilOrder(orderId: string, payment?: { provider: Provider; paymentId?: string; verifySource?: string }) {
-  return sql.begin(async (tx) => {
+  const res = await sql.begin(async (tx) => {
     const [o] = await tx<{ id: string; user_id: string; fest_id: string; ticket_type_id: string; qty: number; status: string }[]>`
       select id, user_id, fest_id, ticket_type_id, qty, status from orders where id = ${orderId} for update`;
     if (!o) throw new OrderError('Order not found.');
     if (o.status === 'paid') return { issued: 0, already: true };
     if (o.status === 'refunded') throw new OrderError('Order was refunded.');
 
+    // Money arrived but no ticket can be issued: keep the order unpaid, remember the payment,
+    // and flag it for a refund. (Returned, not thrown, so the flag is actually saved.)
+    const needsRefund = async (reason: string) => {
+      await tx`update orders set review_flag = ${reason},
+                 payment_ref = coalesce(${payment?.paymentId ?? null}, payment_ref),
+                 verify_source = coalesce(${payment?.verifySource ?? null}, verify_source)
+               where id = ${orderId}`;
+      return { refundNeeded: reason };
+    };
+
+    // Share-lock the fest so a cancellation can't slip in between this check and the tickets.
+    const [f] = await tx<{ status: string }[]>`select status from fests where id = ${o.fest_id} for share`;
+    if (f.status === 'cancelled') return needsRefund('Paid after the fest was cancelled — refund needed');
+
     if (o.status === 'failed') {
       // Hold expired before payment landed — re-reserve if seats remain, else it needs a refund
       const [tt] = await tx<{ sold: number; quota: number }[]>`select sold, quota from ticket_types where id = ${o.ticket_type_id} for update`;
-      if (tt.sold + o.qty > tt.quota) {
-        await tx`update orders set review_flag = 'Paid after seats sold out — refund needed' where id = ${orderId}`;
-        throw new OrderError('Payment received after seats sold out — refund required.');
-      }
+      if (tt.sold + o.qty > tt.quota) return needsRefund('Paid after seats sold out — refund needed');
       await tx`update ticket_types set sold = sold + ${o.qty} where id = ${o.ticket_type_id}`;
     }
 
@@ -143,6 +156,8 @@ export async function fulfilOrder(orderId: string, payment?: { provider: Provide
     }
     return { issued: o.qty, already: false, userId: o.user_id, festId: o.fest_id };
   });
+  if ('refundNeeded' in res) throw new OrderError(res.refundNeeded as string);
+  return res;
 }
 
 /** Mark a pending order failed and release its seats (user cancelled checkout). */

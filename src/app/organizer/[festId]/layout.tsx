@@ -2,6 +2,7 @@ import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { canManage, getOwnFest } from '@/lib/queries';
 import { OrgShell } from '@/components/OrgShell';
+import { VerifyNotice } from '@/components/VerifyNotice';
 import { logout } from '../../(auth)/actions';
 
 export default async function FestLayout({ children, params }: { children: React.ReactNode; params: Promise<{ festId: string }> }) {
@@ -12,6 +13,7 @@ export default async function FestLayout({ children, params }: { children: React
 
   return (
     <OrgShell festId={fest.id} festName={fest.name} slug={fest.slug} status={fest.status} fests={[...fests]} userName={user.name} isAdmin={!!user.is_admin} logoutAction={logout}>
+      {!user.verified && <VerifyNotice email={user.email} />}
       {children}
     </OrgShell>
   );

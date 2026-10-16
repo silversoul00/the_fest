@@ -1,8 +1,8 @@
 import 'server-only';
 import { sql } from './db';
 import { OrderError } from './orders';
-import { refundCashfree } from './cashfree';
-import { refundRazorpay } from './payments';
+import { cashfreeRefundedTotal, cashfreeRefundId, refundCashfree } from './cashfree';
+import { razorpayRefundedTotal, refundRazorpay } from './payments';
 import { notifyRefund } from './mail';
 
 /**
@@ -38,21 +38,23 @@ export async function refundOrder(orderId: string, opts: { festId: string; ticke
         platform_fee_paise = greatest(platform_fee_paise - ${share(o.platform_fee_paise)}, 0),
         gateway_fee_paise = greatest(gateway_fee_paise - ${share(o.gateway_fee_paise)}, 0),
         status = ${left === 0 ? 'refunded' : 'paid'}::order_status,
-        refunded_at = now(), refund_status = ${refundStatus},
+        refunded_at = now(),
+        -- an earlier failed gateway refund stays visible until it's retried
+        refund_status = case when refund_failed_paise > 0 then 'failed' else ${refundStatus} end,
         refund_note = ${opts.reason.slice(0, 200)}
       where id = ${orderId}`;
     if (opts.releaseSeats !== false) await tx`update ticket_types set sold = greatest(sold - ${k}, 0) where id = ${o.ticket_type_id}`;
-    return { amount, k, provider: o.provider, paymentId: o.provider === 'razorpay' ? o.razorpay_payment_id : o.payment_ref };
+    return { amount, k, provider: o.provider, refundedAfter: o.refunded_paise + amount, paymentId: o.provider === 'razorpay' ? o.razorpay_payment_id : o.payment_ref };
   });
 
   // Money movement happens after the database is updated; failures are flagged for retry.
   let gatewayOk = true;
   if (res.amount > 0 && (res.provider === 'cashfree' || res.provider === 'razorpay')) {
     try {
-      if (res.provider === 'cashfree') await refundCashfree(orderId, res.amount, `rf-${orderId.slice(0, 8)}-${Date.now().toString(36)}`, 'Ticket cancelled');
+      if (res.provider === 'cashfree') await refundCashfree(orderId, res.amount, cashfreeRefundId(orderId, res.refundedAfter), 'Ticket cancelled');
       else if (res.paymentId) await refundRazorpay(res.paymentId, res.amount, 'Ticket cancelled');
       else throw new Error('No payment id');
-      await sql`update orders set refund_status = 'done' where id = ${orderId}`;
+      await sql`update orders set refund_status = case when refund_failed_paise > 0 then 'failed' else 'done' end where id = ${orderId}`;
     } catch (e) {
       gatewayOk = false;
       console.error('gateway refund failed', orderId, e);
@@ -84,13 +86,32 @@ export async function cancelFest(festId: string, reason: string) {
   return { refunded, failed, skipped, total: orders.length };
 }
 
-/** Admin: retry a gateway refund that failed earlier. */
+/**
+ * Admin: retry a gateway refund that failed earlier.
+ * The order is claimed atomically (two clicks can't both send money), and the gateway is asked
+ * how much it has already refunded first — a refund that "failed" on our side but actually went
+ * through is not sent again.
+ */
 export async function retryRefund(orderId: string) {
-  const [o] = await sql<{ provider: string; refund_failed_paise: number; payment_ref: string | null; razorpay_payment_id: string | null }[]>`
-    select provider, refund_failed_paise, payment_ref, razorpay_payment_id from orders where id = ${orderId} and refund_status = 'failed'`;
-  if (!o || o.refund_failed_paise <= 0) throw new OrderError('Nothing to retry.');
-  if (o.provider === 'cashfree') await refundCashfree(orderId, o.refund_failed_paise, `rf-${orderId.slice(0, 8)}-${Date.now().toString(36)}`, 'Ticket cancelled');
-  else if (o.provider === 'razorpay' && o.razorpay_payment_id) await refundRazorpay(o.razorpay_payment_id, o.refund_failed_paise, 'Ticket cancelled');
-  else throw new OrderError('This payment can’t be refunded through a gateway.');
-  await sql`update orders set refund_status = 'done', refund_failed_paise = 0, review_flag = null where id = ${orderId}`;
+  const [o] = await sql<{ provider: string; refunded_paise: number; refund_failed_paise: number; razorpay_payment_id: string | null }[]>`
+    update orders set refund_status = 'processing'
+    where id = ${orderId} and refund_status = 'failed' and refund_failed_paise > 0
+    returning provider, refunded_paise, refund_failed_paise, razorpay_payment_id`;
+  if (!o) throw new OrderError('Nothing to retry (or a retry is already running).');
+  try {
+    let already: number;
+    if (o.provider === 'cashfree') already = await cashfreeRefundedTotal(orderId);
+    else if (o.provider === 'razorpay' && o.razorpay_payment_id) already = await razorpayRefundedTotal(o.razorpay_payment_id);
+    else throw new OrderError('This payment can’t be refunded through a gateway.');
+    const due = Math.min(o.refund_failed_paise, o.refunded_paise - already);
+    if (due > 0) {
+      if (o.provider === 'cashfree') await refundCashfree(orderId, due, cashfreeRefundId(orderId, o.refunded_paise), 'Ticket cancelled');
+      else await refundRazorpay(o.razorpay_payment_id!, due, 'Ticket cancelled');
+    }
+    await sql`update orders set refund_status = 'done', refund_failed_paise = 0, review_flag = null where id = ${orderId}`;
+    return { sent: Math.max(due, 0) };
+  } catch (e) {
+    await sql`update orders set refund_status = 'failed' where id = ${orderId} and refund_status = 'processing'`;
+    throw e;
+  }
 }

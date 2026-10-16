@@ -1,8 +1,10 @@
 # Refunds & cancellations: partial refund voids tickets + gate rejects them,
 # zero-fee UPI refund tracked until marked sent, whole-fest cancellation.
-import asyncio, os, re, sys
+import asyncio, os, re, subprocess, sys
 from playwright.async_api import async_playwright
 B = os.environ.get('E2E_BASE', 'http://localhost:3000')
+DB = os.environ.get('E2E_PSQL', 'psql -h /tmp -U postgres thefest')
+def q(sql): return subprocess.run(DB + ' -qtAc "' + sql + '"', shell=True, capture_output=True, text=True).stdout.strip()
 results = []
 def check(name, cond, extra=''):
     results.append((name, bool(cond))); print(('PASS ' if cond else 'FAIL ') + name + (f'  [{extra}]' if extra else ''))
@@ -48,6 +50,9 @@ async def main():
         await org.goto(f'{B}/organizer')
         await org.click('a:has-text("Commerce Carnival")'); await org.wait_for_url(re.compile(r'/organizer/[0-9a-f-]{36}$'))
         cid = org.url.rstrip('/').split('/')[-1]
+        # A student paid by bank UPI and typed the UTR, but the bank credit only shows up after cancellation
+        q(f"update fests set upi_enabled = true, upi_vpa = 'cc@icici' where id = '{cid}'")
+        late = q(f"insert into orders (user_id, fest_id, ticket_type_id, qty, amount_paise, platform_fee_paise, gateway_fee_paise, provider, method, utr, utr_submitted_at) select u.id, '{cid}', tt.id, 1, 12345, 0, 0, 'upi_direct', 'upi_direct', '700000000001', now() from users u, ticket_types tt where u.email = 'student@thefest.in' and tt.fest_id = '{cid}' limit 1 returning id").splitlines()[0]
         await org.goto(f'{B}/organizer/{cid}/settings')
         form = org.locator('form:has(button:has-text("Cancel fest"))')
         await form.locator('input[name=reason]').fill('Venue unavailable'); await form.locator('input[name=confirm]').fill('cancel please')
@@ -59,6 +64,11 @@ async def main():
         await org.goto(f'{B}/organizer/{cid}/sales')
         refunded = await org.locator('.badge', has_text='Refunded').count()
         check('every order in the cancelled fest refunded', refunded >= 25, refunded)
+        await org.goto(f'{B}/organizer/{cid}/payments')
+        await org.fill('textarea[name=alerts]', 'Rs.123.45 credited to your A/c. UPI Ref No 700000000001.')
+        await org.click('button:has-text("Match payments")'); await org.wait_for_selector('text=need a look')
+        row = q(f"select status, review_flag, (select count(*) from tickets where order_id = o.id) from orders o where id = '{late}'").split('|')
+        check('payment after cancellation issues no ticket and is flagged for refund', row[0] != 'paid' and 'cancelled' in (row[1] or '') and row[2] == '0', row)
         pub = await st.goto(B + '/fests/commerce-carnival')
         check('public page shows cancellation', await st.locator('text=This fest was cancelled').count() == 1)
         check('cancelled fest hidden from discover', 'Commerce Carnival' not in await (await st.goto(B + '/fests')).text())

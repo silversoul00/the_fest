@@ -64,12 +64,14 @@ async function userFromCookie(name: string, kind: 'app' | 'scanner'): Promise<Us
   const token = jar.get(name)?.value;
   if (!token) return null;
   const rows = await sql<User[]>`
-    select u.id, u.email::text, u.name, u.phone, u.college, u.role, u.created_at, u.is_admin
+    select u.id, u.email::text, u.name, u.phone, u.college, u.role, u.created_at, u.is_admin,
+           (u.email_verified_at is not null) as verified
     from sessions s join users u on u.id = s.user_id
     where s.token_hash = ${sha256(token)} and s.kind = ${kind} and s.expires_at > now()`;
   const u = rows[0];
   if (!u) return null;
-  return { ...u, is_admin: u.is_admin || adminEmails().includes(u.email.toLowerCase()) };
+  // ADMIN_EMAILS only counts for a verified inbox — otherwise anyone could sign up with that address first.
+  return { ...u, is_admin: u.is_admin || (u.verified && adminEmails().includes(u.email.toLowerCase())) };
 }
 
 /** Current app user (memoised per request). */

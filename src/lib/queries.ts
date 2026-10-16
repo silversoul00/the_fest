@@ -28,8 +28,10 @@ export async function getFestBySlug(slug: string) {
 
 /** Organizer-owned fest or 404. */
 /** SQL condition: `user` runs fest `f` — as its owner or as a co-organizer added by email. */
-export const canManage = (user: Pick<User, 'id' | 'email'>, alias = 'f') =>
-  sql`(${sql(alias)}.organizer_id = ${user.id} or exists (select 1 from fest_members m where m.fest_id = ${sql(alias)}.id and m.email = ${user.email}))`;
+export const canManage = (user: Pick<User, 'id' | 'email' | 'verified'>, alias = 'f') =>
+  user.verified
+    ? sql`(${sql(alias)}.organizer_id = ${user.id} or exists (select 1 from fest_members m where m.fest_id = ${sql(alias)}.id and m.email = ${user.email}))`
+    : sql`(${sql(alias)}.organizer_id = ${user.id})`;
 
 /** A fest the user runs (owner or co-organizer). `is_owner` gates money and team settings. */
 export async function getOwnFest(festId: string, user: User) {
@@ -87,6 +89,6 @@ export async function scannableFests(user: User) {
     select f.*, null::text as duty from fests f where ${canManage(user)} and f.status in ('live', 'review', 'draft')
     union
     select f.*, s.duty from fests f join fest_staff s on s.fest_id = f.id
-    where s.email = ${user.email} and s.can_scan and f.status in ('live', 'review', 'draft')
+    where s.email = ${user.email} and ${user.verified} and s.can_scan and f.status in ('live', 'review', 'draft')
     order by starts_on`;
 }

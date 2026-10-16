@@ -94,8 +94,14 @@ async def main():
         check('inbound email: bad token → 404', bad == 404, bad)
         r6 = amt6.replace('₹', '').replace(',', '')
         res = await st.evaluate(f"""fetch('/api/upi/inbound/{token}',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-            body:JSON.stringify({{Subject:'Credit alert',TextBody:'Dear Customer, INR {r6} credited to your account. UPI Ref No 812345678901'}})}}).then(r=>r.json())""")
-        check('inbound email confirms order', res.get('matched') == 1, json.dumps(res))
+            body:JSON.stringify({{From:'Totally Your Bank <alerts@not-a-bank.example>',Subject:'Rs.{r6} credited',TextBody:'Dear Customer, INR {r6} credited to your account. UPI Ref No 812345678901'}})}}).then(r=>r.json())""")
+        check('inbound email from unknown sender only flags', res.get('matched') == 0 and res.get('flagged') == 1 and res.get('trusted') is False, json.dumps(res))
+        check('subject line does not create a second credit', res.get('credits') == 1, json.dumps(res))
+        amt7, o7 = await buy_upi(st, '812345678902')
+        r7 = amt7.replace('₹', '').replace(',', '')
+        res = await st.evaluate(f"""fetch('/api/upi/inbound/{token}',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+            body:JSON.stringify({{FromFull:{{Email:'credit_cards@icicibank.com'}},Subject:'Rs.{r7} credited',TextBody:'Dear Customer, INR {r7} credited to your account. UPI Ref No 812345678902'}})}}).then(r=>r.json())""")
+        check('inbound email from bank confirms order', res.get('matched') == 1, json.dumps(res))
         # 7) Gateway option still shows payment charges; UPI option shows none
         await st.goto(B + '/fests/neon-utsav'); await st.click('text=Card / UPI checkout')
         check('card checkout shows payment charges line', await st.locator('.row.between span', has_text='Payment charges').count() == 1)

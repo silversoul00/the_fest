@@ -254,6 +254,18 @@ alter table tickets add column if not exists transferred_to uuid references tick
 alter table tickets add column if not exists void_reason    text;
 alter table fests   add column if not exists allow_transfers boolean not null default true;
 
+-- v2.2: email verification. Access granted by email (co-organizer, gate staff, sponsor, ADMIN_EMAILS)
+-- only counts once the account has proved it owns that inbox.
+alter table users add column if not exists email_verified_at timestamptz;
+create table if not exists email_verifications (
+  token_hash  text primary key,
+  user_id     uuid not null references users(id) on delete cascade,
+  expires_at  timestamptz not null,
+  used_at     timestamptz,
+  created_at  timestamptz not null default now()
+);
+alter table email_verifications enable row level security;
+
 -- Bank credits seen by THE FEST (statement rows, alert emails, pasted SMS).
 -- One UTR can only ever confirm one order.
 create table if not exists upi_credits (
@@ -267,6 +279,9 @@ create table if not exists upi_credits (
   created_at        timestamptz not null default now()
 );
 create unique index if not exists upi_credits_utr_uniq on upi_credits(fest_id, utr) where utr is not null;
+-- Credits without a UTR are de-duplicated by a hash of amount + the alert/statement line
+alter table upi_credits add column if not exists fingerprint text;
+create unique index if not exists upi_credits_fp_uniq on upi_credits(fest_id, fingerprint) where utr is null and fingerprint is not null;
 
 -- Co-organizers: other committee members who can manage a fest
 create table if not exists fest_members (

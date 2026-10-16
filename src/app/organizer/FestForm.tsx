@@ -3,12 +3,15 @@ import { useState } from 'react';
 import { ActionForm, Submit } from '@/components/forms';
 import type { ActionState, Fest } from '@/lib/types';
 
+import type { FestFormFields } from '@/lib/fest-form';
+
 const EMOJIS = ['🎉', '🎆', '🎵', '🎨', '🚀', '💡', '⚽', '📈', '🎭', '🎤', '🌿', '🔥'];
 const ACCENTS = ['#FFE034', '#FF5C1A', '#00E5A0', '#38BDF8', '#FF2D55', '#B794F6'];
 
 export function FestForm({ action, fest, create }: {
   action: (s: ActionState, fd: FormData) => Promise<ActionState>;
-  fest?: Fest;
+  /** Only the editable fields — never pass a whole fest row to this client component (it would ship every column to the browser). */
+  fest?: FestFormFields;
   create?: boolean;
 }) {
   const [emoji, setEmoji] = useState(fest?.emoji ?? '🎉');

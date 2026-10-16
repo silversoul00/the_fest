@@ -23,7 +23,7 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
   const user = await getUser();
   // Drafts are visible only to their organizer (preview)
   const runsIt = !!user && !!fest && (fest.organizer_id === user.id
-    || (await sql`select 1 from fest_members where fest_id = ${fest.id} and email = ${user.email}`).length > 0);
+    || (user.verified && (await sql`select 1 from fest_members where fest_id = ${fest.id} and email = ${user.email}`).length > 0));
   if (!fest || ((fest.status === 'draft' || fest.status === 'review') && !runsIt && !user?.is_admin)) notFound();
 
   const [types, schedule, news] = await Promise.all([getTicketTypes(fest.id), getSchedule(fest.id), getAnnouncements(fest.id, 5)]);

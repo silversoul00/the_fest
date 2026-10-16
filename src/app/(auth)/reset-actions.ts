@@ -51,7 +51,8 @@ export async function resetPassword(_: ActionState, fd: FormData): Promise<Actio
     returning pr.user_id, u.role`;
   if (!r) return { error: 'This reset link has expired or was already used. Ask for a new one.' };
 
-  await sql`update users set password_hash = ${await hashPassword(pw)} where id = ${r.user_id}`;
+  // Using the emailed link also proves they own the inbox
+  await sql`update users set password_hash = ${await hashPassword(pw)}, email_verified_at = coalesce(email_verified_at, now()) where id = ${r.user_id}`;
   // Sign out everywhere (including any scanner session), then sign in here
   await sql`delete from sessions where user_id = ${r.user_id}`;
   await sql`update password_resets set used_at = coalesce(used_at, now()) where user_id = ${r.user_id}`;

@@ -82,3 +82,15 @@ export async function refundCashfree(orderId: string, amountPaise: number, refun
     body: { refund_amount: Number((amountPaise / 100).toFixed(2)), refund_id: refundId.slice(0, 40), refund_note: note.slice(0, 100) },
   });
 }
+
+/** Total already refunded (or in progress) at Cashfree for this order, in paise. */
+export async function cashfreeRefundedTotal(orderId: string): Promise<number> {
+  const list = await cf<{ refund_amount: number; refund_status: string }[]>(`/orders/${encodeURIComponent(orderId)}/refunds`);
+  return (Array.isArray(list) ? list : [])
+    .filter((r) => !['CANCELLED', 'FAILED'].includes(String(r.refund_status).toUpperCase()))
+    .reduce((s, r) => s + Math.round(Number(r.refund_amount) * 100), 0);
+}
+
+/** Deterministic refund id: the same refund step always gets the same id, so a retry can't pay twice. */
+export const cashfreeRefundId = (orderId: string, refundedAfterPaise: number) =>
+  `rf${orderId.replace(/-/g, '')}${refundedAfterPaise.toString(36)}`.slice(0, 40);

@@ -1,3 +1,4 @@
+import { VerifyNotice } from '@/components/VerifyNotice';
 import Link from 'next/link';
 import type { CSSProperties } from 'react';
 import { requireUser } from '@/lib/auth';
@@ -21,7 +22,7 @@ export default async function SponsorHome() {
       (select count(*) from tickets t where t.fest_id = f.id and t.status = 'used')::int as footfall,
       (select count(*) from sponsor_visits v where v.sponsor_id = s.id)::int as visits
     from sponsors s join fests f on f.id = s.fest_id
-    where s.email = ${user.email} and f.status <> 'draft'
+    where s.email = ${user.email} and ${user.verified} and f.status <> 'draft'
     order by f.starts_on desc`;
 
   const totals = rows.reduce((a, r) => ({ spend: a.spend + r.amount_paise, foot: a.foot + r.footfall, visits: a.visits + r.visits }), { spend: 0, foot: 0, visits: 0 });
@@ -43,6 +44,7 @@ export default async function SponsorHome() {
           <h1 className="h2 mt8">Your <span className="c-blue">sponsorships</span></h1>
         </div>
 
+        {!user.verified && <VerifyNotice email={user.email} />}
         {rows.length === 0 ? (
           <Empty icon="🏷️" title="No sponsorships linked yet">
             When a fest organizer adds <strong>{user.email}</strong> as a sponsor, it appears here automatically.

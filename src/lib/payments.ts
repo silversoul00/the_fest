@@ -76,4 +76,12 @@ export async function refundRazorpay(paymentId: string, amountPaise: number, not
   return rzp.payments.refund(paymentId, { amount: amountPaise, notes: { reason: note.slice(0, 200) } });
 }
 
+/** Total already refunded at Razorpay for this payment, in paise. */
+export async function razorpayRefundedTotal(paymentId: string): Promise<number> {
+  const Razorpay = (await import('razorpay')).default;
+  const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID!, key_secret: process.env.RAZORPAY_KEY_SECRET! });
+  const p = await rzp.payments.fetch(paymentId);
+  return Number(p.amount_refunded ?? 0);
+}
+
 export { safeEq };

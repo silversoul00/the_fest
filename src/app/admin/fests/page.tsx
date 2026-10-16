@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { sql } from '@/lib/db';
+import { requireAdmin } from '@/lib/auth';
 import { festMoney } from '@/lib/admin-queries';
 import { ago, num, rupees } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
@@ -7,6 +8,8 @@ import { FestStatus } from '@/components/ui';
 import { recordPayout } from '../actions';
 
 export default async function AdminFests() {
+  // Every admin page checks for itself: layouts don't run on client-side navigation requests.
+  await requireAdmin();
   const [money, payouts] = await Promise.all([
     festMoney(),
     sql<{ id: string; name: string; amount_paise: number; reference: string | null; note: string | null; created_at: Date }[]>`

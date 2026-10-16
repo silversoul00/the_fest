@@ -15,7 +15,7 @@ export default async function SponsorDetail({ params }: { params: Promise<{ id: 
   const [s] = await sql<{ id: string; brand: string; tier: string; amount_paise: number; booth_code: string; fest_id: string; fest_name: string; college: string; city: string; starts_on: string; ends_on: string; status: string }[]>`
     select s.id, s.brand, s.tier, s.amount_paise, s.booth_code, f.id as fest_id, f.name as fest_name, f.college, f.city, f.starts_on, f.ends_on, f.status
     from sponsors s join fests f on f.id = s.fest_id
-    where s.id = ${id} and s.email = ${user.email} and f.status <> 'draft'`;
+    where s.id = ${id} and s.email = ${user.email} and ${user.verified} and f.status <> 'draft'`;
   if (!s) notFound();
 
   const [[m], colleges, hourly] = await Promise.all([

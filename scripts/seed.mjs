@@ -44,13 +44,13 @@ try {
       console.error('Refusing to --reset a Supabase database. Add --yes-really if you are sure.');
       process.exit(1);
     }
-    await sql`truncate payouts, upi_credits, fest_members, password_resets, email_outbox, sponsor_visits, sponsors, announcements, schedule_events, fest_staff, scans, tickets, orders, ticket_types, fests, sessions, users restart identity cascade`;
+    await sql`truncate email_verifications, payouts, upi_credits, fest_members, password_resets, email_outbox, sponsor_visits, sponsors, announcements, schedule_events, fest_staff, scans, tickets, orders, ticket_types, fests, sessions, users restart identity cascade`;
     console.log('• wiped');
   }
 
   const hash = await bcrypt.hash('password123', 10);
   const mkUser = async (email, name, role, college = null) =>
-    (await sql`insert into users (email, password_hash, name, role, college) values (${email}, ${hash}, ${name}, ${role}, ${college}) returning id`)[0].id;
+    (await sql`insert into users (email, password_hash, name, role, college, email_verified_at) values (${email}, ${hash}, ${name}, ${role}, ${college}, now()) returning id`)[0].id;
 
   const organizer = await mkUser('organizer@thefest.in', 'Riya Kapoor', 'organizer', COLLEGES[0]);
   const organizer2 = await mkUser('organizer2@thefest.in', 'Dev Malhotra', 'organizer', COLLEGES[1]);

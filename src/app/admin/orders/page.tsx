@@ -1,10 +1,13 @@
 import Link from 'next/link';
 import { sql } from '@/lib/db';
+import { requireAdmin } from '@/lib/auth';
 import { ago, rupees } from '@/lib/format';
 import { Empty } from '@/components/ui';
 import { retryRefundAction } from '../actions';
 
 export default async function AdminOrders({ searchParams }: { searchParams: Promise<{ q?: string; flagged?: string }> }) {
+  // Every admin page checks for itself: layouts don't run on client-side navigation requests.
+  await requireAdmin();
   const { q = '', flagged } = await searchParams;
   const like = q.trim() ? `%${q.trim()}%` : null;
   const rows = await sql<{ id: string; created_at: Date; status: string; provider: string; method: string; amount_paise: number; refunded_paise: number; qty: number; utr: string | null; payment_ref: string | null; review_flag: string | null; refund_status: string | null; refund_failed_paise: number; name: string; email: string; fest: string; fest_id: string }[]>`
@@ -12,7 +15,7 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
            u.name, u.email::text, f.name as fest, f.id as fest_id
     from orders o join users u on u.id = o.user_id join fests f on f.id = o.fest_id
     where true
-      ${flagged ? sql`and ((o.review_flag is not null and o.review_flag not like 'Rejected%' and o.status <> 'paid') or o.refund_status = 'failed')` : sql``}
+      ${flagged ? sql`and ((o.review_flag is not null and o.review_flag not like 'Rejected%' and o.status <> 'paid') or o.refund_status = 'failed' or o.refund_failed_paise > 0)` : sql``}
       ${like ? sql`and (u.email ilike ${like} or u.name ilike ${like} or o.utr ilike ${like} or o.payment_ref ilike ${like} or f.name ilike ${like} or o.id::text ilike ${like})` : sql``}
     order by o.created_at desc limit 150`;
 

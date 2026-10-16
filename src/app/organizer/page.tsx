@@ -8,6 +8,7 @@ import { FestStatus } from '@/components/ui';
 import type { Fest } from '@/lib/types';
 import { logout } from '../(auth)/actions';
 import { canManage } from '@/lib/queries';
+import { VerifyNotice } from '@/components/VerifyNotice';
 
 export const metadata = { title: 'Your fests' };
 
@@ -32,6 +33,7 @@ export default async function OrganizerHome() {
         </div>
       </header>
       <main className="wrap page stack g16">
+        {!user.verified && <VerifyNotice email={user.email} />}
         <div className="row between wrap-row g12">
           <h1 className="h2">Your fests</h1>
           <Link href="/organizer/new" className="btn orange sm">+ New fest</Link>

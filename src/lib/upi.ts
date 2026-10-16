@@ -1,5 +1,5 @@
 import 'server-only';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { sql } from './db';
 import { fulfilOrder, OrderError } from './orders';
 import { UTR_RE, type Credit } from './upi-parse';
@@ -16,12 +16,25 @@ export type MatchResult = {
  * Match bank credits to open bank-UPI orders of one fest.
  * 1. Same UTR the student typed + exact amount → confirm.
  * 2. Same UTR but different amount → flag for the organizer.
- * 3. No UTR match → if exactly one open order has this exact (paise-tagged) amount → confirm.
- * Every credit is stored once per UTR, so the same payment can never confirm two orders.
- * Unmatched credits are kept: when a student later submits that UTR, it confirms instantly.
+ * 3. No UTR match → if exactly one *pending* order has this exact (paise-tagged) amount → confirm.
+ *    If that order already carries a different UTR the student typed, flag instead.
+ * Every credit is stored once (per UTR, or per hash of its text when it has no UTR), so the same
+ * payment can never confirm two orders. Unmatched credits are kept: when a student later submits
+ * that UTR, it confirms instantly.
+ * `trusted: false` (e.g. an email from an unknown sender) records the credits but only flags
+ * matching orders for the organizer to check — it never issues tickets by itself.
  */
-export async function matchCredits(festId: string, credits: Credit[], source: 'statement' | 'email' | 'paste'): Promise<MatchResult> {
+export async function matchCredits(
+  festId: string, credits: Credit[], source: 'statement' | 'email' | 'paste', opts: { trusted?: boolean } = {},
+): Promise<MatchResult> {
+  const trusted = opts.trusted ?? true;
   const res: MatchResult = { matched: [], flagged: [], unmatched: [], duplicates: 0 };
+
+  const flag = async (orderId: string, creditId: number, c: Credit, reason: string) => {
+    await sql`update orders set review_flag = ${reason} where id = ${orderId} and status <> 'paid'`;
+    await sql`update upi_credits set matched_order_id = ${orderId} where id = ${creditId}`;
+    res.flagged.push({ orderId, utr: c.utr, amountPaise: c.amountPaise, reason });
+  };
 
   for (const c of credits) {
     if (c.utr && !UTR_RE.test(c.utr)) c.utr = null;
@@ -34,9 +47,10 @@ export async function matchCredits(festId: string, credits: Credit[], source: 's
       if (existing) creditId = existing.id;
     }
     if (!creditId) {
+      const fp = c.utr ? null : createHash('sha256').update(`${c.amountPaise}|${c.raw.replace(/\s+/g, ' ').trim()}`).digest('hex');
       const [ins] = await sql<{ id: number }[]>`
-        insert into upi_credits (fest_id, utr, amount_paise, source, raw)
-        values (${festId}, ${c.utr}, ${c.amountPaise}, ${source}, ${c.raw})
+        insert into upi_credits (fest_id, utr, amount_paise, source, raw, fingerprint)
+        values (${festId}, ${c.utr}, ${c.amountPaise}, ${source}, ${c.raw}, ${fp})
         on conflict do nothing returning id`;
       if (!ins) { res.duplicates++; continue; }
       creditId = ins.id;
@@ -49,30 +63,36 @@ export async function matchCredits(festId: string, credits: Credit[], source: 's
         select id, amount_paise from orders
         where fest_id = ${festId} and method = 'upi_direct' and utr = ${c.utr} and status in ('pending', 'failed')`;
       if (order && order.amount_paise !== c.amountPaise) {
-        const reason = `Paid ₹${(c.amountPaise / 100).toFixed(2)}, expected ₹${(order.amount_paise / 100).toFixed(2)}`;
-        await sql`update orders set review_flag = ${reason} where id = ${order.id}`;
-        await sql`update upi_credits set matched_order_id = ${order.id} where id = ${creditId}`;
-        res.flagged.push({ orderId: order.id, utr: c.utr, amountPaise: c.amountPaise, reason });
+        await flag(order.id, creditId, c, `Paid ₹${(c.amountPaise / 100).toFixed(2)}, expected ₹${(order.amount_paise / 100).toFixed(2)}`);
         continue;
       }
     }
     let how: 'utr' | 'amount' = 'utr';
-    // 3: by unique amount
+    // 3: by unique amount — only orders still waiting for payment
     if (!order) {
       const cands = await sql<{ id: string; amount_paise: number; utr: string | null }[]>`
         select id, amount_paise, utr from orders
         where fest_id = ${festId} and method = 'upi_direct' and amount_paise = ${c.amountPaise}
-          and status in ('pending', 'failed') and created_at > now() - interval '7 days'`;
+          and status = 'pending' and created_at > now() - interval '7 days'`;
       if (cands.length === 1) {
-        order = cands[0]; how = 'amount';
-        if (c.utr && cands[0].utr !== c.utr) {
-          // Student typed a different (wrong) UTR, or none. Record the real one.
+        const cand = cands[0];
+        if (cand.utr && c.utr && cand.utr !== c.utr) {
+          await flag(cand.id, creditId, c, `Amount matches, but the student entered UTR ${cand.utr} and the bank shows ${c.utr}`);
+          continue;
+        }
+        order = cand; how = 'amount';
+        if (c.utr && !cand.utr) {
           try { await sql`update orders set utr = ${c.utr}, utr_submitted_at = coalesce(utr_submitted_at, now()) where id = ${order.id}`; }
-          catch { /* UTR already on another order — leave as is, still matched by amount */ }
+          catch { /* UTR already on another order — leave as is */ }
         }
       }
     }
     if (!order) { res.unmatched.push(c); continue; }
+
+    if (!trusted) {
+      await flag(order.id, creditId, c, 'Bank alert came from an unrecognised sender — check your bank app, then confirm');
+      continue;
+    }
 
     try {
       await fulfilOrder(order.id, { provider: 'upi_direct', paymentId: c.utr ?? undefined, verifySource: source });
@@ -81,8 +101,7 @@ export async function matchCredits(festId: string, credits: Credit[], source: 's
       notifyOrderPaid(order.id).catch(() => {});
     } catch (e) {
       const reason = e instanceof OrderError ? e.message : 'Could not confirm';
-      await sql`update upi_credits set matched_order_id = ${order.id} where id = ${creditId}`;
-      res.flagged.push({ orderId: order.id, utr: c.utr, amountPaise: c.amountPaise, reason });
+      await flag(order.id, creditId, c, reason);
     }
   }
   return res;

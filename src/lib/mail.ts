@@ -25,7 +25,8 @@ export async function sendEmail(to: string, subject: string, text: string) {
       body: JSON.stringify({ from: process.env.EMAIL_FROM ?? 'THE FEST <onboarding@resend.dev>', to: [to], subject, text }),
     });
     if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    await sql`update email_outbox set status = 'sent' where id = ${row.id}`;
+    // Once delivered, don't keep live one-time links (password reset, email confirm) in the database
+    await sql`update email_outbox set status = 'sent', body_text = regexp_replace(body_text, 'token=[A-Za-z0-9_-]+', 'token=[redacted]', 'g') where id = ${row.id}`;
     return { sent: true };
   } catch (e) {
     await sql`update email_outbox set status = 'failed', error = ${String(e).slice(0, 500)} where id = ${row.id}`;

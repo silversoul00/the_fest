@@ -1,6 +1,7 @@
 import { requireUser } from '@/lib/auth';
 import { getMembers, getOwnFest } from '@/lib/queries';
 import { FestForm } from '../../FestForm';
+import { festFormFields } from '@/lib/fest-form';
 import { addMember, setAllowTransfers, cancelFestAction, removeMember, setFestStatus, updateFest } from '../../actions';
 import { ActionForm, Submit } from '@/components/forms';
 
@@ -54,7 +55,7 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
 
       <div className="card">
         <div className="h3 mb16">Fest details</div>
-        <FestForm action={updateFest} fest={fest} />
+        <FestForm action={updateFest} fest={festFormFields(fest)} />
       </div>
       <div className="card stack g12" id="team">
         <div className="h3">Co-organizers</div>

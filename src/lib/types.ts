@@ -9,6 +9,8 @@ export interface User {
   role: Role;
   created_at: Date;
   is_admin?: boolean;
+  /** Has proved they own `email`. Email-based access (co-organizer, staff, sponsor) needs this. */
+  verified: boolean;
 }
 
 export interface Fest {

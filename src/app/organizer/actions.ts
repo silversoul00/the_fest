@@ -314,12 +314,15 @@ export async function uploadStatement(_: PaymentsState, fd: FormData): Promise<P
 
 export async function confirmUpiOrder(fd: FormData) {
   const { fest } = await ownFest(fd);
-  await confirmManually(s(fd, 'orderId'), fest.id);
+  if (!isUuid(s(fd, 'orderId'))) return;
+  try { await confirmManually(s(fd, 'orderId'), fest.id); }
+  catch (e) { if (!(e instanceof OrderError)) throw e; /* flagged on the order (e.g. refund needed) */ }
   refresh(fest.id);
 }
 
 export async function rejectUpiOrder(fd: FormData) {
   const { fest } = await ownFest(fd);
+  if (!isUuid(s(fd, 'orderId'))) return;
   await rejectUpi(s(fd, 'orderId'), fest.id, s(fd, 'note') || 'No matching payment in the bank account');
   refresh(fest.id);
 }
@@ -334,6 +337,7 @@ export async function rotateInboundToken(fd: FormData) {
 
 export async function refundOrderAction(_: ActionState, fd: FormData): Promise<ActionState> {
   const { fest } = await ownFest(fd, { ownerOnly: true });
+  if (!isUuid(s(fd, 'orderId'))) return { error: 'Order not found.' };
   const reason = s(fd, 'reason');
   const n = Number(s(fd, 'tickets') || 0);
   if (reason.length < 3) return { error: 'Add a short reason — the student sees it.' };
@@ -352,6 +356,7 @@ export async function refundOrderAction(_: ActionState, fd: FormData): Promise<A
 
 export async function markUpiRefundSent(fd: FormData) {
   const { fest } = await ownFest(fd, { ownerOnly: true });
+  if (!isUuid(s(fd, 'orderId'))) return;
   await sql`update orders set refund_status = 'done' where id = ${s(fd, 'orderId')} and fest_id = ${fest.id} and refund_status = 'manual_pending'`;
   refresh(fest.id);
 }

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { sql } from '@/lib/db';
+import { requireAdmin } from '@/lib/auth';
 import { festMoney } from '@/lib/admin-queries';
 import { dateRange, num, rupees } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
@@ -7,6 +8,8 @@ import { Empty, Stat } from '@/components/ui';
 import { approveFest, sendBackFest } from './actions';
 
 export default async function AdminHome() {
+  // Every admin page checks for itself: layouts don't run on client-side navigation requests.
+  await requireAdmin();
   const [money, review, [counts], flagged] = await Promise.all([
     festMoney(),
     sql<{ id: string; name: string; slug: string; college: string; city: string; starts_on: string; ends_on: string; organizer: string; email: string; phone: string | null; types: number; min_price: number | null; created_at: Date; description: string }[]>`

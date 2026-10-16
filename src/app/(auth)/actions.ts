@@ -6,6 +6,7 @@ import {
   clearFailedLogins, createSession, destroySession, hashPassword, loginThrottled,
   normalizeEmail, noteFailedLogin, PORTAL, verifyPassword,
 } from '@/lib/auth';
+import { sendVerification } from '@/lib/verify';
 import type { ActionState, Role } from '@/lib/types';
 
 const safeNext = (n: FormDataEntryValue | null) => {
@@ -35,6 +36,7 @@ export async function signup(_: ActionState, fd: FormData): Promise<ActionState>
     insert into users (email, password_hash, name, phone, college, role)
     values (${email}, ${await hashPassword(d.password)}, ${d.name}, ${d.phone || null}, ${d.college || null}, ${d.role})
     returning id`;
+  await sendVerification(u.id).catch(() => {});
   await createSession(u.id, 'app');
   redirect(safeNext(fd.get('next')) || (d.role === 'organizer' ? '/organizer/new' : PORTAL[d.role as Role]));
 }
