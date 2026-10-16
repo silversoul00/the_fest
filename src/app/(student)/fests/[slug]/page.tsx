@@ -6,7 +6,7 @@ import type { ScheduleEvent } from '@/lib/types';
 import { getUser } from '@/lib/auth';
 import { getAnnouncements, getFestBySlug, getSchedule, getTicketTypes } from '@/lib/queries';
 import { ago, dateRange, dayLabel, time } from '@/lib/format';
-import { feePayer, platformFeePaise, razorpayEnabled } from '@/lib/payments';
+import { activeGateway, feeConfig } from '@/lib/payments';
 import { catLabel, FestStatus } from '@/components/ui';
 import { BuyTickets } from './BuyTickets';
 
@@ -117,9 +117,10 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
                 signedIn={!!user}
                 isStudent={user?.role === 'student'}
                 types={types.filter((t) => t.active).map((t) => ({ id: t.id, name: t.name, description: t.description, price: t.price_paise, left: t.quota - t.sold }))}
-                fee={platformFeePaise()}
-                feeOnStudent={feePayer() === 'student'}
-                demoPayments={!razorpayEnabled()}
+                feeCfg={feeConfig()}
+                gateway={activeGateway()}
+                upiEnabled={!!(fest.upi_enabled && fest.upi_vpa)}
+                hasPhone={!!user?.phone && /^[6-9]\d{9}$/.test(user.phone.replace(/\D/g, '').slice(-10))}
                 prefill={user ? { name: user.name, email: user.email, contact: user.phone ?? '' } : null}
               />
             )}

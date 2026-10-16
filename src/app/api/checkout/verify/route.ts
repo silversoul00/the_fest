@@ -3,6 +3,7 @@ import { sql } from '@/lib/db';
 import { body, fail, isUuid, json, sameOrigin } from '@/lib/http';
 import { fulfilOrder, OrderError } from '@/lib/orders';
 import { verifyCheckoutSignature } from '@/lib/payments';
+import { notifyOrderPaid } from '@/lib/mail';
 
 // Called by the Razorpay checkout handler in the browser after payment.
 // The webhook (/api/webhooks/razorpay) is the backup if this never arrives.
@@ -23,7 +24,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    await fulfilOrder(b.orderId, { provider: 'razorpay', paymentId: b.razorpay_payment_id });
+    const r = await fulfilOrder(b.orderId, { provider: 'razorpay', paymentId: b.razorpay_payment_id });
+    if (!r.already) notifyOrderPaid(b.orderId).catch(() => {});
     return json({ ok: true });
   } catch (e) {
     if (e instanceof OrderError) return fail(e.message, 409);

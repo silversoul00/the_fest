@@ -1,10 +1,14 @@
 'use client';
-import { useActionState, useEffect, useRef } from 'react';
+import { createContext, startTransition, useActionState, useContext, useEffect, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import type { ActionState } from '@/lib/types';
 
+const Pending = createContext(false);
+
 export function Submit({ children, className = 'btn block', pendingText = 'Working…' }: { children: React.ReactNode; className?: string; pendingText?: string }) {
-  const { pending } = useFormStatus();
+  const { pending: formPending } = useFormStatus();
+  const ctxPending = useContext(Pending);
+  const pending = formPending || ctxPending;
   return (
     <button className={className} disabled={pending} type="submit">
       {pending ? pendingText : children}
@@ -20,8 +24,11 @@ export function FormMessage({ state }: { state: ActionState }) {
 }
 
 /**
- * <ActionForm action={serverAction}> — wraps useActionState, shows errors,
- * and optionally resets after success (for "add item" forms).
+ * <ActionForm action={serverAction}> — runs a server action, shows its error or
+ * success message, and KEEPS what the user typed when there's an error
+ * (React's built-in <form action> clears every field after submitting).
+ * Pass resetOnSuccess for "add item" forms that should clear after saving.
+ * Redirects thrown by the action (e.g. after login) still navigate normally.
  */
 export function ActionForm({
   action, children, className = 'form', resetOnSuccess = false,
@@ -31,15 +38,25 @@ export function ActionForm({
   className?: string;
   resetOnSuccess?: boolean;
 }) {
-  const [state, formAction] = useActionState(action, null);
+  const [state, formAction, isPending] = useActionState(action, null);
   const ref = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (resetOnSuccess && state?.ok) ref.current?.reset();
   }, [state, resetOnSuccess]);
   return (
-    <form ref={ref} action={formAction} className={className}>
-      <FormMessage state={state} />
-      {children}
+    <form
+      ref={ref}
+      className={className}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const fd = new FormData(e.currentTarget);
+        startTransition(() => formAction(fd));
+      }}
+    >
+      <Pending.Provider value={isPending}>
+        <FormMessage state={state} />
+        {children}
+      </Pending.Provider>
     </form>
   );
 }

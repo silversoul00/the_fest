@@ -211,3 +211,105 @@ alter table schedule_events  enable row level security;
 alter table announcements    enable row level security;
 alter table sponsors         enable row level security;
 alter table sponsor_visits   enable row level security;
+
+-- ═══════════════════════════════════════════════════════════════
+-- v2 (Oct 2026): payments (Cashfree + zero-fee bank UPI), admin approval,
+-- refunds, password reset, ticket transfer, co-organizers, payouts.
+-- Idempotent — safe to re-run.
+-- ═══════════════════════════════════════════════════════════════
+alter type fest_status add value if not exists 'review';     -- waiting for THE FEST approval
+alter type fest_status add value if not exists 'cancelled';
+alter type order_status add value if not exists 'refunded';
+
+alter table users add column if not exists is_admin boolean not null default false;
+
+alter table fests add column if not exists upi_enabled   boolean not null default false;
+alter table fests add column if not exists upi_vpa       text;           -- e.g. fest@icici (fest's own bank account)
+alter table fests add column if not exists upi_name      text;           -- payee name shown in the UPI app
+alter table fests add column if not exists inbound_token text unique;   -- secret for forwarding bank alert emails
+alter table fests add column if not exists approved_at   timestamptz;
+alter table fests add column if not exists approved_by   uuid references users(id);
+alter table fests add column if not exists review_note   text;           -- admin's note when sending back
+alter table fests add column if not exists cancelled_reason text;
+
+alter table orders add column if not exists method            text not null default 'gateway';  -- gateway | upi_direct | free
+alter table orders add column if not exists gateway_fee_paise int  not null default 0;
+alter table orders add column if not exists provider_order_id text;     -- Cashfree order id
+alter table orders add column if not exists payment_ref       text;     -- gateway payment id
+alter table orders add column if not exists utr               text;     -- UPI reference typed by student
+alter table orders add column if not exists utr_submitted_at  timestamptz;
+alter table orders add column if not exists verify_source     text;     -- statement | email | paste | manual
+alter table orders add column if not exists review_flag       text;     -- why an order needs a human look
+alter table orders add column if not exists refunded_paise    int  not null default 0;
+alter table orders add column if not exists refunded_at       timestamptz;
+alter table orders add column if not exists refund_note       text;
+alter table orders drop constraint if exists orders_provider_check;
+alter table orders add constraint orders_provider_check
+  check (provider in ('razorpay', 'cashfree', 'demo', 'free', 'upi_direct'));
+create unique index if not exists orders_utr_uniq on orders(utr) where utr is not null;
+create unique index if not exists orders_provider_order_uniq on orders(provider_order_id) where provider_order_id is not null;
+create index if not exists orders_upi_pending_idx on orders(fest_id, method, status);
+
+alter table tickets add column if not exists transferred_to uuid references tickets(id);
+alter table tickets add column if not exists void_reason    text;
+
+-- Bank credits seen by THE FEST (statement rows, alert emails, pasted SMS).
+-- One UTR can only ever confirm one order.
+create table if not exists upi_credits (
+  id                bigserial primary key,
+  fest_id           uuid not null references fests(id) on delete cascade,
+  utr               text,
+  amount_paise      int  not null,
+  source            text not null,                 -- statement | email | paste
+  raw               text,
+  matched_order_id  uuid references orders(id),
+  created_at        timestamptz not null default now()
+);
+create unique index if not exists upi_credits_utr_uniq on upi_credits(fest_id, utr) where utr is not null;
+
+-- Co-organizers: other committee members who can manage a fest
+create table if not exists fest_members (
+  id          uuid primary key default gen_random_uuid(),
+  fest_id     uuid not null references fests(id) on delete cascade,
+  email       citext not null,
+  added_by    uuid references users(id),
+  created_at  timestamptz not null default now(),
+  unique (fest_id, email)
+);
+
+create table if not exists password_resets (
+  token_hash  text primary key,
+  user_id     uuid not null references users(id) on delete cascade,
+  expires_at  timestamptz not null,
+  used_at     timestamptz,
+  created_at  timestamptz not null default now()
+);
+
+-- Money THE FEST has paid out to each fest (manual bank transfers for now)
+create table if not exists payouts (
+  id            uuid primary key default gen_random_uuid(),
+  fest_id       uuid not null references fests(id) on delete cascade,
+  amount_paise  int  not null check (amount_paise > 0),
+  reference     text,                 -- bank transfer UTR
+  note          text,
+  created_by    uuid references users(id),
+  created_at    timestamptz not null default now()
+);
+
+-- Emails sent (or, without an email provider configured, queued here so
+-- nothing is lost and links can be read in development).
+create table if not exists email_outbox (
+  id          bigserial primary key,
+  to_email    citext not null,
+  subject     text not null,
+  body_text   text not null,
+  status      text not null default 'queued',   -- queued | sent | failed | logged
+  error       text,
+  created_at  timestamptz not null default now()
+);
+
+alter table upi_credits     enable row level security;
+alter table fest_members    enable row level security;
+alter table password_resets enable row level security;
+alter table payouts         enable row level security;
+alter table email_outbox    enable row level security;

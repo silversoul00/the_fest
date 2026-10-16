@@ -25,8 +25,15 @@ export interface Fest {
   emoji: string;
   accent: string;
   capacity: number | null;
-  status: 'draft' | 'live' | 'ended';
+  status: 'draft' | 'review' | 'live' | 'ended' | 'cancelled';
   created_at: Date;
+  upi_enabled: boolean;
+  upi_vpa: string | null;
+  upi_name: string | null;
+  inbound_token: string | null;
+  approved_at: Date | null;
+  review_note: string | null;
+  cancelled_reason: string | null;
 }
 
 export interface TicketType {

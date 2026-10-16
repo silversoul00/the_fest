@@ -7,6 +7,9 @@ import { sql } from '@/lib/db';
 import { slugify } from '@/lib/format';
 import { boothCode } from '@/lib/ticket-crypto';
 import { isUuid } from '@/lib/http';
+import { matchCredits, confirmManually, rejectUpiOrder as rejectUpi, newInboundToken } from '@/lib/upi';
+import { parseAlerts, parseCsv, parseStatement, VPA_RE, type Credit } from '@/lib/upi-parse';
+import type { MatchResult } from '@/lib/upi';
 import type { ActionState } from '@/lib/types';
 
 // ─── helpers ──────────────────────────────────────────────
@@ -233,5 +236,81 @@ export async function addSponsor(_: ActionState, fd: FormData): Promise<ActionSt
 export async function removeSponsor(fd: FormData) {
   const { fest } = await ownFest(fd);
   await sql`delete from sponsors where id = ${s(fd, 'id')} and fest_id = ${fest.id}`;
+  refresh(fest.id);
+}
+
+// ─── Payments: zero-fee bank UPI ──────────────────────────
+
+export type PaymentsState = (ActionState & { result?: MatchResult }) | null;
+
+export async function saveUpiSettings(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const enabled = fd.get('upi_enabled') === 'on';
+  const vpa = s(fd, 'upi_vpa');
+  const name = s(fd, 'upi_name').slice(0, 60);
+  if (enabled && !VPA_RE.test(vpa)) return { error: 'Enter the fest’s UPI ID, like neonutsav@icici' };
+  await sql`update fests set upi_enabled = ${enabled}, upi_vpa = ${vpa || null}, upi_name = ${name || null} where id = ${fest.id}`;
+  refresh(fest.id);
+  return { ok: true, message: enabled ? 'Zero-fee UPI is on. Students can now pay the fest directly.' : 'Saved.' };
+}
+
+const summary = (r: MatchResult) =>
+  `${r.matched.length} confirmed · ${r.flagged.length} need a look · ${r.unmatched.length} not matched yet${r.duplicates ? ` · ${r.duplicates} already seen` : ''}`;
+
+export async function pasteAlerts(_: PaymentsState, fd: FormData): Promise<PaymentsState> {
+  const { fest } = await ownFest(fd);
+  const text = s(fd, 'alerts').slice(0, 200_000);
+  const credits = parseAlerts(text);
+  if (!credits.length) return { error: 'No credit alerts found. Paste the bank SMS or email text that says an amount was credited.' };
+  const r = await matchCredits(fest.id, credits, 'paste');
+  refresh(fest.id);
+  return { ok: true, message: summary(r), result: r };
+}
+
+export async function uploadStatement(_: PaymentsState, fd: FormData): Promise<PaymentsState> {
+  const { fest } = await ownFest(fd);
+  const file = fd.get('statement');
+  if (!(file instanceof File) || file.size === 0) return { error: 'Choose your bank statement file (CSV or Excel .xlsx).' };
+  if (file.size > 5 * 1024 * 1024) return { error: 'File is too big (max 5 MB). Download a shorter date range.' };
+  const name = file.name.toLowerCase();
+  let rows: (string | number | null)[][];
+  try {
+    if (name.endsWith('.xlsx')) {
+      const readXlsx = (await import('read-excel-file/node')).default;
+      const sheets = await readXlsx(Buffer.from(await file.arrayBuffer()));
+      // Use the first sheet that looks like a statement
+      const toRows = (d: unknown[][]) => d.map((r) => r.map((c) => (c instanceof Date ? c.toISOString().slice(0, 10) : (c as string | number | null))));
+      rows = toRows((sheets.find((sh) => !parseStatement(toRows(sh.data as unknown[][])).error) ?? sheets[0]).data as unknown[][]);
+    } else if (name.endsWith('.csv') || name.endsWith('.txt')) {
+      rows = parseCsv(await file.text());
+    } else {
+      return { error: 'Use CSV or .xlsx. For an old .xls file, open it and “Save as” CSV.' };
+    }
+  } catch {
+    return { error: 'Couldn’t read that file. Try downloading the statement as CSV.' };
+  }
+  const { credits, error } = parseStatement(rows);
+  if (error) return { error };
+  if (!credits.length) return { error: 'No credits found in this statement.' };
+  const r = await matchCredits(fest.id, credits as Credit[], 'statement');
+  refresh(fest.id);
+  return { ok: true, message: `${credits.length} credits read · ${summary(r)}`, result: r };
+}
+
+export async function confirmUpiOrder(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await confirmManually(s(fd, 'orderId'), fest.id);
+  refresh(fest.id);
+}
+
+export async function rejectUpiOrder(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await rejectUpi(s(fd, 'orderId'), fest.id, s(fd, 'note') || 'No matching payment in the bank account');
+  refresh(fest.id);
+}
+
+export async function rotateInboundToken(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`update fests set inbound_token = ${newInboundToken()} where id = ${fest.id}`;
   refresh(fest.id);
 }

@@ -8,6 +8,7 @@ const TABS = [
   { seg: '', icon: '⚡', label: 'Overview' },
   { seg: '/tickets', icon: '🎟️', label: 'Tickets' },
   { seg: '/sales', icon: '💰', label: 'Sales' },
+  { seg: '/payments', icon: '🏦', label: 'Payments' },
   { seg: '/schedule', icon: '📅', label: 'Schedule' },
   { seg: '/volunteers', icon: '👥', label: 'Volunteers' },
   { seg: '/announcements', icon: '📢', label: 'Announce' },

@@ -10,6 +10,14 @@ DB_URL=$(grep -E '^DATABASE_URL=' .env.local | cut -d= -f2-)
 case "$DB_URL" in *localhost*|*127.0.0.1*) ;; *) echo "Refusing: DATABASE_URL is not local"; exit 1;; esac
 PSQL="psql $DB_URL -qtA -F ' '"
 
+# Pure-logic checks first (fast)
+node scripts/check-pricing.mjs 2>/dev/null
+node scripts/check-upi-parse.mjs 2>/dev/null
+
+# Stop any server already on :3000
+for d in /proc/[0-9]*; do c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true); case "$c" in next-server*) kill "${d#/proc/}" 2>/dev/null || true;; esac; done
+sleep 1
+
 npm run -s db:setup
 npm run -s db:seed -- --reset > /dev/null
 PORT=3000 npx next start > "$E2E_DIR/server.log" 2>&1 &
@@ -23,6 +31,7 @@ node -e "require('qrcode').toFile(process.argv[1], process.argv[2], {width:600, 
 ffmpeg -loglevel error -y -loop 1 -i "$E2E_DIR/qr.png" -vf "scale=640:640,format=yuv420p" -t 6 -r 15 "$E2E_DIR/qr.y4m"
 
 python3 tests/e2e.py
+python3 tests/upi.py
 
 # Race tests on fresh rows
 export RACE_FEST=$(eval "$PSQL" -c "\"select id from fests where slug='neon-utsav'\"")

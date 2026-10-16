@@ -2,8 +2,9 @@ import Link from 'next/link';
 import type { CSSProperties } from 'react';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
-import { dateRange, todayIST } from '@/lib/format';
+import { dateRange, rupees, todayIST } from '@/lib/format';
 import { Empty } from '@/components/ui';
+import { AutoRefresh } from '@/components/AutoRefresh';
 
 export const metadata = { title: 'My tickets' };
 
@@ -25,6 +26,17 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
     where t.user_id = ${user.id} and t.status <> 'void'
     order by f.starts_on asc, t.issued_at asc`;
 
+  const pending = await sql<{ id: string; fest_name: string; qty: number; amount_paise: number; utr: string | null; review_flag: string | null }[]>`
+    select o.id, f.name as fest_name, o.qty, o.amount_paise, o.utr, o.review_flag
+    from orders o join fests f on f.id = o.fest_id
+    where o.user_id = ${user.id} and o.method = 'upi_direct'
+      and (o.status = 'pending' or (o.status = 'failed' and o.utr is not null and o.review_flag is not null and o.review_flag not like 'Rejected%'))
+      and o.created_at > now() - interval '7 days'
+    order by o.created_at desc`;
+  const rejected = await sql<{ id: string; fest_name: string; review_flag: string }[]>`
+    select o.id, f.name as fest_name, o.review_flag from orders o join fests f on f.id = o.fest_id
+    where o.user_id = ${user.id} and o.method = 'upi_direct' and o.status = 'failed' and o.review_flag like 'Rejected%'
+      and o.created_at > now() - interval '7 days'`;
   const today = todayIST();
   const upcoming = rows.filter((r) => r.ends_on >= today);
   const past = rows.filter((r) => r.ends_on < today);
@@ -33,12 +45,29 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
   return (
     <div className="wrap stack g16">
       <h1 className="h2 mt8">My tickets</h1>
+      {pending.some((p) => p.utr) && <AutoRefresh seconds={10} />}
 
       {fresh.length > 0 && (
         <div className="alert ok">🎉 You&apos;re in! {fresh.length} ticket{fresh.length > 1 ? 's' : ''} for {fresh[0].fest_name}. Show the QR at the gate.</div>
       )}
 
-      {rows.length === 0 ? (
+      {pending.map((p) => (
+        <Link key={p.id} href={`/orders/${p.id}`} className="card link row g12" style={{ borderColor: 'rgba(255,224,52,.3)' }}>
+          <span style={{ fontSize: 24 }}>⏳</span>
+          <span className="grow">
+            <strong>{p.fest_name}</strong> · {p.qty} ticket{p.qty > 1 ? 's' : ''} · <span className="mono">{rupees(p.amount_paise)}</span>
+            <span className="xs muted" style={{ display: 'block' }}>
+              {p.utr ? (p.review_flag ? `Organizer is checking: ${p.review_flag}` : 'Payment received, confirming with the fest…') : 'Waiting for your UPI payment — tap to pay or enter the UTR'}
+            </span>
+          </span>
+          <span className="muted">→</span>
+        </Link>
+      ))}
+      {rejected.map((p) => (
+        <div key={p.id} className="alert error">{p.fest_name}: the organizer couldn’t find your payment ({p.review_flag.replace(/^Rejected: /, '')}). If money left your account, contact the fest with your UTR.</div>
+      ))}
+
+      {rows.length === 0 && pending.length === 0 ? (
         <Empty icon="🎟️" title="No tickets yet">
           <Link className="accent" href="/fests">Find a fest →</Link>
         </Empty>

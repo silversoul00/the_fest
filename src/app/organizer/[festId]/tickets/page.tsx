@@ -1,7 +1,8 @@
 import { requireUser } from '@/lib/auth';
 import { getOwnFest, getTicketTypes } from '@/lib/queries';
 import { num, rupees } from '@/lib/format';
-import { feePayer, platformFeePaise } from '@/lib/payments';
+import { feeConfig } from '@/lib/payments';
+import { describeFee } from '@/lib/pricing';
 import { ActionForm, Submit } from '@/components/forms';
 import { addTicketType, toggleTicketType, updateTicketType } from '../../actions';
 
@@ -9,15 +10,15 @@ export default async function TicketTypes({ params }: { params: Promise<{ festId
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
   const types = await getTicketTypes(fest.id);
-  const fee = platformFeePaise();
+  const cfg = feeConfig();
 
   return (
     <div className="stack g16">
       <h1 className="h2">Ticket types</h1>
       <p className="small soft">
-        {feePayer() === 'student'
-          ? <>Students pay a {rupees(fee)} convenience fee on top of paid tickets — you receive the full ticket price.</>
-          : <>THE FEST keeps {rupees(fee)} per paid ticket; the rest is paid out to you.</>} Free tickets cost nothing.
+        {cfg.payer === 'student'
+          ? <>THE FEST charges students a convenience fee of {describeFee(cfg)}{cfg.passGateway ? ' plus card payment charges' : ''}. You receive the full ticket price.</>
+          : <>THE FEST keeps {describeFee(cfg)}; the rest is paid out to you.</>} Free tickets cost nothing.
       </p>
 
       <div className="stack g12">

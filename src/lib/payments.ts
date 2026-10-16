@@ -1,23 +1,49 @@
 import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { FeeConfig } from './pricing';
 
-export const razorpayEnabled = () => !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
+/* ─── Commission settings (env) ───────────────────────────────────────
+ * PLATFORM_FEE_MODE        flat | percent            (default flat)
+ * PLATFORM_FEE_PAISE       flat fee per paid ticket   (default 1500 = ₹15)
+ * PLATFORM_FEE_PERCENT     % of ticket price          (default 5)
+ * PLATFORM_FEE_MIN_PAISE   floor in percent mode      (default 800 = ₹8)
+ * PLATFORM_FEE_MAX_PAISE   cap in percent mode, 0=none (default 3000 = ₹30)
+ * PLATFORM_FEE_PAYER       student | organizer        (default student)
+ * GATEWAY_RATE             gateway % incl. GST        (default 0.0236)
+ * PASS_GATEWAY_FEE         true | false               (default true)
+ */
+const num = (v: string | undefined, d: number) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 
-/** THE FEST commission per paid ticket (paise). Default ₹15. */
-export const platformFeePaise = () => Number(process.env.PLATFORM_FEE_PAISE ?? 1500);
-
-/** 'student' → fee added on top at checkout (convenience fee).
- *  'organizer' → student pays ticket price only; fee deducted from organizer payout. */
-export const feePayer = (): 'student' | 'organizer' =>
-  process.env.PLATFORM_FEE_PAYER === 'organizer' ? 'organizer' : 'student';
-
-export function priceOrder(pricePaise: number, qty: number) {
-  const subtotal = pricePaise * qty;
-  const fee = pricePaise > 0 ? platformFeePaise() * qty : 0;
-  const total = feePayer() === 'student' ? subtotal + fee : subtotal;
-  return { subtotal, fee, total };
+export function feeConfig(): FeeConfig {
+  return {
+    mode: process.env.PLATFORM_FEE_MODE === 'percent' ? 'percent' : 'flat',
+    flatPaise: num(process.env.PLATFORM_FEE_PAISE, 1500),
+    percent: num(process.env.PLATFORM_FEE_PERCENT, 5),
+    minPaise: num(process.env.PLATFORM_FEE_MIN_PAISE, 800),
+    maxPaise: num(process.env.PLATFORM_FEE_MAX_PAISE, 3000),
+    payer: process.env.PLATFORM_FEE_PAYER === 'organizer' ? 'organizer' : 'student',
+    gatewayRate: num(process.env.GATEWAY_RATE, 0.0236),
+    passGateway: process.env.PASS_GATEWAY_FEE !== 'false',
+  };
 }
 
+/* ─── Which card/UPI gateway is live ──────────────────────────────────
+ * PAYMENT_GATEWAY=cashfree|razorpay forces one; otherwise Cashfree is used
+ * when its keys are set, then Razorpay, else clearly-labelled demo mode.
+ */
+export const cashfreeEnabled = () => !!(process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY);
+export const razorpayEnabled = () => !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
+
+export function activeGateway(): 'cashfree' | 'razorpay' | 'demo' {
+  const forced = process.env.PAYMENT_GATEWAY;
+  if (forced === 'cashfree' && cashfreeEnabled()) return 'cashfree';
+  if (forced === 'razorpay' && razorpayEnabled()) return 'razorpay';
+  if (cashfreeEnabled()) return 'cashfree';
+  if (razorpayEnabled()) return 'razorpay';
+  return 'demo';
+}
+
+/* ─── Razorpay ────────────────────────────────────────────────────── */
 function safeEq(a: string, b: string) {
   const x = Buffer.from(a), y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
@@ -43,3 +69,11 @@ export async function createRazorpayOrder(amountPaise: number, receipt: string, 
   const order = await rzp.orders.create({ amount: amountPaise, currency: 'INR', receipt, notes });
   return order as { id: string; amount: number; currency: string };
 }
+
+export async function refundRazorpay(paymentId: string, amountPaise: number, note: string) {
+  const Razorpay = (await import('razorpay')).default;
+  const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID!, key_secret: process.env.RAZORPAY_KEY_SECRET! });
+  return rzp.payments.refund(paymentId, { amount: amountPaise, notes: { reason: note.slice(0, 200) } });
+}
+
+export { safeEq };
