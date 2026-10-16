@@ -313,3 +313,7 @@ alter table fest_members    enable row level security;
 alter table password_resets enable row level security;
 alter table payouts         enable row level security;
 alter table email_outbox    enable row level security;
+
+-- v2.1: refund tracking (manual_pending = organizer must send UPI back; failed = gateway refund failed, retry)
+alter table orders add column if not exists refund_status text check (refund_status in ('done', 'manual_pending', 'failed', 'processing'));
+alter table orders add column if not exists refund_failed_paise int not null default 0;  -- gateway refund amount awaiting retry

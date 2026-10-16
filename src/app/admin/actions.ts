@@ -5,6 +5,7 @@ import { sql } from '@/lib/db';
 import { isUuid } from '@/lib/http';
 import { sendEmail } from '@/lib/mail';
 import type { ActionState } from '@/lib/types';
+import { retryRefund } from '@/lib/refunds';
 
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
 const site = () => process.env.NEXT_PUBLIC_SITE_URL ?? '';
@@ -47,4 +48,12 @@ export async function recordPayout(_: ActionState, fd: FormData): Promise<Action
             values (${f.id}, ${amount}, ${s(fd, 'reference').slice(0, 60) || null}, ${s(fd, 'note').slice(0, 200) || null}, ${admin.id})`;
   revalidatePath('/admin', 'layout');
   return { ok: true, message: `Recorded ₹${(amount / 100).toLocaleString('en-IN')} paid to ${f.name}.` };
+}
+
+export async function retryRefundAction(fd: FormData) {
+  await requireAdmin();
+  const id = s(fd, 'orderId');
+  if (!isUuid(id)) return;
+  try { await retryRefund(id); } catch (e) { console.error('retry refund failed', e); }
+  revalidatePath('/admin', 'layout');
 }

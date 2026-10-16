@@ -110,7 +110,7 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
           <aside className="card" style={{ position: 'sticky', top: 76 }} id="tickets">
             <h2 className="h3 mb16">Tickets</h2>
             {!canBuy ? (
-              <p className="small muted">{fest.status === 'ended' ? 'This fest has ended.' : 'Tickets are not on sale yet.'}</p>
+              <p className="small muted">{fest.status === 'ended' ? 'This fest has ended.' : fest.status === 'cancelled' ? `This fest was cancelled${fest.cancelled_reason ? `: ${fest.cancelled_reason}` : ''}. Everyone who bought a ticket is refunded.` : 'Tickets are not on sale yet.'}</p>
             ) : (
               <BuyTickets
                 festSlug={fest.slug}

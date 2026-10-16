@@ -1,7 +1,8 @@
 import { requireUser } from '@/lib/auth';
 import { getOwnFest } from '@/lib/queries';
 import { FestForm } from '../../FestForm';
-import { setFestStatus, updateFest } from '../../actions';
+import { cancelFestAction, setFestStatus, updateFest } from '../../actions';
+import { ActionForm, Submit } from '@/components/forms';
 
 export default async function Settings({ params }: { params: Promise<{ festId: string }> }) {
   const user = await requireUser('organizer');
@@ -43,6 +44,18 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
         <div className="h3 mb16">Fest details</div>
         <FestForm action={updateFest} fest={fest} />
       </div>
+      {fest.status !== 'cancelled' && fest.status !== 'ended' && (
+        <div className="card stack g12" style={{ borderColor: 'rgba(255,45,85,.35)' }}>
+          <div className="h3 c-red">Cancel this fest</div>
+          <p className="small soft">Stops ticket sales and refunds every unused ticket in full. Card payments are refunded automatically; zero-fee UPI payments appear in Sales for you to send back. This can’t be undone.</p>
+          <ActionForm action={cancelFestAction}>
+            <input type="hidden" name="festId" value={fest.id} />
+            <label className="field"><span>Reason (sent to every ticket holder)</span><input className="input" name="reason" placeholder="Postponed due to heavy rain" /></label>
+            <label className="field"><span>Type CANCEL to confirm</span><input className="input mono" name="confirm" autoComplete="off" /></label>
+            <Submit className="btn danger">Cancel fest &amp; refund everyone</Submit>
+          </ActionForm>
+        </div>
+      )}
     </div>
   );
 }

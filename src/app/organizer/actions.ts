@@ -4,7 +4,9 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
-import { slugify } from '@/lib/format';
+import { rupees, slugify } from '@/lib/format';
+import { cancelFest, refundOrder } from '@/lib/refunds';
+import { OrderError } from '@/lib/orders';
 import { boothCode } from '@/lib/ticket-crypto';
 import { isUuid } from '@/lib/http';
 import { matchCredits, confirmManually, rejectUpiOrder as rejectUpi, newInboundToken } from '@/lib/upi';
@@ -318,4 +320,41 @@ export async function rotateInboundToken(fd: FormData) {
   const { fest } = await ownFest(fd);
   await sql`update fests set inbound_token = ${newInboundToken()} where id = ${fest.id}`;
   refresh(fest.id);
+}
+
+// ─── Refunds & cancellation ───────────────────────────────
+
+export async function refundOrderAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const reason = s(fd, 'reason');
+  const n = Number(s(fd, 'tickets') || 0);
+  if (reason.length < 3) return { error: 'Add a short reason — the student sees it.' };
+  if (!Number.isInteger(n) || n < 1) return { error: 'Choose how many tickets to cancel.' };
+  try {
+    const r = await refundOrder(s(fd, 'orderId'), { festId: fest.id, tickets: n, reason });
+    refresh(fest.id);
+    if (r.provider === 'upi_direct') return { ok: true, message: `${r.k} ticket(s) cancelled. Send ${rupees(r.amount)} back to the student by UPI, then mark it sent.` };
+    if (!r.gatewayOk) return { ok: true, message: `${r.k} ticket(s) cancelled, but the gateway refund failed. THE FEST has been alerted to retry.` };
+    return { ok: true, message: `${r.k} ticket(s) cancelled${r.amount ? ` and ${rupees(r.amount)} refunded` : ''}.` };
+  } catch (e) {
+    if (e instanceof OrderError) return { error: e.message };
+    throw e;
+  }
+}
+
+export async function markUpiRefundSent(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`update orders set refund_status = 'done' where id = ${s(fd, 'orderId')} and fest_id = ${fest.id} and refund_status = 'manual_pending'`;
+  refresh(fest.id);
+}
+
+export async function cancelFestAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const reason = s(fd, 'reason');
+  if (reason.length < 5) return { error: 'Tell students why the fest is cancelled.' };
+  if (s(fd, 'confirm') !== 'CANCEL') return { error: 'Type CANCEL to confirm. This refunds every ticket and can’t be undone.' };
+  const r = await cancelFest(fest.id, reason);
+  refresh(fest.id);
+  revalidatePath(`/fests/${fest.slug}`);
+  return { ok: true, message: `Fest cancelled. ${r.refunded} order(s) refunded${r.failed ? `, ${r.failed} gateway refund(s) failed (THE FEST will retry)` : ''}${r.skipped ? `, ${r.skipped} skipped (tickets already used)` : ''}.` };
 }

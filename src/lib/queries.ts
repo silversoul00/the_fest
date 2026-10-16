@@ -60,7 +60,7 @@ export async function festStats(festId: string) {
       (select count(*) from tickets where fest_id = ${festId} and status <> 'void')::int as tickets,
       (select count(*) from tickets where fest_id = ${festId} and status = 'used')::int as checked_in,
       -- revenue = what the organizer earns (collected minus THE FEST fee)
-      (select coalesce(sum(amount_paise - platform_fee_paise), 0) from orders where fest_id = ${festId} and status = 'paid')::bigint::int as revenue,
+      (select coalesce(sum(amount_paise - refunded_paise - platform_fee_paise - gateway_fee_paise), 0) from orders where fest_id = ${festId} and status in ('paid', 'refunded'))::bigint::int as revenue,
       (select coalesce(sum(platform_fee_paise), 0) from orders where fest_id = ${festId} and status = 'paid')::int as fees,
       (select count(*) from orders where fest_id = ${festId} and status = 'paid')::int as orders,
       (select coalesce(sum(qty), 0) from orders where fest_id = ${festId} and status = 'paid' and paid_at > now() - interval '24 hours')::int as sold_today,

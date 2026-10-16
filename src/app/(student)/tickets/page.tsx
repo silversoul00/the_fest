@@ -37,6 +37,9 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
     select o.id, f.name as fest_name, o.review_flag from orders o join fests f on f.id = o.fest_id
     where o.user_id = ${user.id} and o.method = 'upi_direct' and o.status = 'failed' and o.review_flag like 'Rejected%'
       and o.created_at > now() - interval '7 days'`;
+  const refunds = await sql<{ id: string; fest_name: string; refunded_paise: number; refund_note: string | null; method: string; refund_status: string | null }[]>`
+    select o.id, f.name as fest_name, o.refunded_paise, o.refund_note, o.method, o.refund_status from orders o join fests f on f.id = o.fest_id
+    where o.user_id = ${user.id} and o.refunded_paise > 0 and o.refunded_at > now() - interval '30 days' order by o.refunded_at desc`;
   const today = todayIST();
   const upcoming = rows.filter((r) => r.ends_on >= today);
   const past = rows.filter((r) => r.ends_on < today);
@@ -65,6 +68,13 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
       ))}
       {rejected.map((p) => (
         <div key={p.id} className="alert error">{p.fest_name}: the organizer couldn’t find your payment ({p.review_flag.replace(/^Rejected: /, '')}). If money left your account, contact the fest with your UTR.</div>
+      ))}
+
+      {refunds.map((r) => (
+        <div key={r.id} className="alert info">
+          {r.fest_name}: {rupees(r.refunded_paise)} refunded{r.refund_note ? ` — ${r.refund_note}` : ''}.{' '}
+          {r.method === 'upi_direct' ? (r.refund_status === 'done' ? 'The organizer has sent it back by UPI.' : 'The organizer will send it back by UPI.') : 'It reaches your account in 5–7 working days.'}
+        </div>
       ))}
 
       {rows.length === 0 && pending.length === 0 ? (
