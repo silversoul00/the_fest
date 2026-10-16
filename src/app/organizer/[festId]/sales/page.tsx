@@ -62,7 +62,7 @@ export default async function Sales({ params, searchParams }: { params: Promise<
             <div key={o.id} className="row wrap-row g12 small">
               <span className="grow">{o.name} · {o.email} · UTR <span className="mono">{o.utr ?? '—'}</span></span>
               <span className="mono">{rupees(o.refunded_paise)}</span>
-              <form action={markUpiRefundSent}><input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="orderId" value={o.id} /><button className="btn sm blue">Mark sent</button></form>
+              {fest.is_owner && <form action={markUpiRefundSent}><input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="orderId" value={o.id} /><button className="btn sm blue">Mark sent</button></form>}
             </div>
           ))}
         </div>
@@ -86,7 +86,7 @@ export default async function Sales({ params, searchParams }: { params: Promise<
                   <td className="num">{rupees(o.amount_paise)}{o.refunded_paise > 0 && <div className="xs c-orange">−{rupees(o.refunded_paise)} refunded</div>}</td>
                   <td className="xs muted" style={{ whiteSpace: 'nowrap' }}>{ago(o.created_at)}</td>
                   <td style={{ minWidth: 120 }}>
-                    {o.status === 'refunded' ? <span className="badge orange">Refunded</span> : o.unused > 0 ? (
+                    {o.status === 'refunded' ? <span className="badge orange">Refunded</span> : !fest.is_owner ? null : o.unused > 0 ? (
                       <details>
                         <summary className="xs c-red" style={{ cursor: 'pointer' }}>Cancel / refund</summary>
                         <ActionForm action={refundOrderAction} className="form mt8">

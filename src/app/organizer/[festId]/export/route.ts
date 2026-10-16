@@ -1,13 +1,14 @@
 import { getUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { isUuid } from '@/lib/http';
+import { canManage } from '@/lib/queries';
 
 // CSV of every issued ticket — for the registration desk, certificates, or Excel.
 export async function GET(_req: Request, { params }: { params: Promise<{ festId: string }> }) {
   const user = await getUser();
   const { festId } = await params;
   if (!user || user.role !== 'organizer' || !isUuid(festId)) return new Response('Not found', { status: 404 });
-  const [fest] = await sql<{ slug: string }[]>`select slug from fests where id = ${festId} and organizer_id = ${user.id}`;
+  const [fest] = await sql<{ slug: string }[]>`select f.slug from fests f where f.id = ${festId} and ${canManage(user)}`;
   if (!fest) return new Response('Not found', { status: 404 });
 
   const rows = await sql<Record<string, unknown>[]>`

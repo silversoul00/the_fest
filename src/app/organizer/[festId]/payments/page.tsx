@@ -34,6 +34,7 @@ export default async function Payments({ params }: { params: Promise<{ festId: s
       <div className="card stack g12">
         <div className="h3">Zero-fee UPI</div>
         <p className="small soft">Students pay your fest’s own UPI ID directly — no payment-gateway charges. Each order gets a unique amount (like ₹270.37) so THE FEST can match it. Use the college or fest committee’s <strong>current account</strong> UPI ID, not a personal one.</p>
+{fest.is_owner ? (
         <ActionForm action={saveUpiSettings}>
           <input type="hidden" name="festId" value={fest.id} />
           <label className="check"><input type="checkbox" name="upi_enabled" defaultChecked={fest.upi_enabled} /> Accept zero-fee UPI for this fest</label>
@@ -43,6 +44,8 @@ export default async function Payments({ params }: { params: Promise<{ festId: s
           </div>
           <Submit className="btn">Save</Submit>
         </ActionForm>
+        ) : <p className="small">{fest.upi_enabled ? <>On · <span className="mono">{fest.upi_vpa}</span></> : 'Off'}</p>}
+        {!fest.is_owner && <p className="xs muted">Only the fest’s owner can change this.</p>}
       </div>
 
       {fest.upi_enabled && (
@@ -89,10 +92,10 @@ export default async function Payments({ params }: { params: Promise<{ festId: s
           <div className="card stack g8">
             <div className="h3">Automatic: forward bank alert emails</div>
             <p className="xs muted">Bank alert emails can be forwarded to THE FEST automatically through an email service (e.g. Cloudflare Email Routing or Postmark inbound) that posts each email to this private link. Confirmations then happen within a minute. Treat the link like a password.</p>
-            {fest.inbound_token
+            {fest.inbound_token && fest.is_owner
               ? <div className="mono small accent" style={{ wordBreak: 'break-all' }}>{site}/api/upi/inbound/{fest.inbound_token}</div>
-              : <p className="small soft">No link yet.</p>}
-            <form action={rotateInboundToken}><input type="hidden" name="festId" value={fest.id} /><button className="btn sm outline">{fest.inbound_token ? 'Reset link' : 'Create link'}</button></form>
+              : <p className="small soft">{fest.inbound_token ? 'Set up — only the owner can see the link.' : 'No link yet.'}</p>}
+            {fest.is_owner && <form action={rotateInboundToken}><input type="hidden" name="festId" value={fest.id} /><button className="btn sm outline">{fest.inbound_token ? 'Reset link' : 'Create link'}</button></form>}
           </div>
 
           <div className="card">

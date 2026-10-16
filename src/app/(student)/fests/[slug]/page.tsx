@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react';
 import type { Metadata } from 'next';
 import type { ScheduleEvent } from '@/lib/types';
 import { getUser } from '@/lib/auth';
+import { sql } from '@/lib/db';
 import { getAnnouncements, getFestBySlug, getSchedule, getTicketTypes } from '@/lib/queries';
 import { ago, dateRange, dayLabel, time } from '@/lib/format';
 import { activeGateway, feeConfig } from '@/lib/payments';
@@ -21,7 +22,9 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
   const fest = await getFestBySlug(slug);
   const user = await getUser();
   // Drafts are visible only to their organizer (preview)
-  if (!fest || ((fest.status === 'draft' || fest.status === 'review') && fest.organizer_id !== user?.id && !user?.is_admin)) notFound();
+  const runsIt = !!user && !!fest && (fest.organizer_id === user.id
+    || (await sql`select 1 from fest_members where fest_id = ${fest.id} and email = ${user.email}`).length > 0);
+  if (!fest || ((fest.status === 'draft' || fest.status === 'review') && !runsIt && !user?.is_admin)) notFound();
 
   const [types, schedule, news] = await Promise.all([getTicketTypes(fest.id), getSchedule(fest.id), getAnnouncements(fest.id, 5)]);
 
@@ -33,7 +36,7 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
   }
 
   const canBuy = fest.status === 'live';
-  const isOwner = user?.id === fest.organizer_id;
+  const isOwner = runsIt;
 
   return (
     <div style={{ '--fest': fest.accent, marginTop: -20 } as CSSProperties}>

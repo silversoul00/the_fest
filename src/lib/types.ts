@@ -29,6 +29,7 @@ export interface Fest {
   status: 'draft' | 'review' | 'live' | 'ended' | 'cancelled';
   created_at: Date;
   upi_enabled: boolean;
+  allow_transfers: boolean;
   upi_vpa: string | null;
   upi_name: string | null;
   inbound_token: string | null;

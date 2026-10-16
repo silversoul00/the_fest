@@ -9,6 +9,8 @@ import { cancelFest, refundOrder } from '@/lib/refunds';
 import { OrderError } from '@/lib/orders';
 import { boothCode } from '@/lib/ticket-crypto';
 import { isUuid } from '@/lib/http';
+import { canManage } from '@/lib/queries';
+import { sendEmail } from '@/lib/mail';
 import { matchCredits, confirmManually, rejectUpiOrder as rejectUpi, newInboundToken } from '@/lib/upi';
 import { parseAlerts, parseCsv, parseStatement, VPA_RE, type Credit } from '@/lib/upi-parse';
 import type { MatchResult } from '@/lib/upi';
@@ -19,16 +21,22 @@ const s = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
 const rupeesToPaise = (v: string) => Math.round(Number(v || 0) * 100);
 const first = (e: z.ZodError) => ({ error: e.issues[0].message });
 
-/** Ensures the signed-in organizer owns the fest named in the form. */
-async function ownFest(fd: FormData) {
+/**
+ * Ensures the signed-in organizer runs the fest named in the form (owner or co-organizer).
+ * `ownerOnly` actions — where money goes, refunds, the team, cancelling — need the owner.
+ */
+async function ownFest(fd: FormData, opts: { ownerOnly?: boolean } = {}) {
   const user = await requireUser('organizer');
   const festId = s(fd, 'festId');
   if (!isUuid(festId)) throw new Error('Fest not found');
-  const [f] = await sql<{ id: string; slug: string; starts_on: string; ends_on: string }[]>`
-    select id, slug, starts_on, ends_on from fests where id = ${festId} and organizer_id = ${user.id}`;
+  const [f] = await sql<{ id: string; slug: string; name: string; starts_on: string; ends_on: string; is_owner: boolean }[]>`
+    select f.id, f.slug, f.name, f.starts_on, f.ends_on, (f.organizer_id = ${user.id}) as is_owner
+    from fests f where f.id = ${festId} and ${canManage(user)}`;
   if (!f) throw new Error('Fest not found');
+  if (opts.ownerOnly && !f.is_owner) throw new OwnerOnly();
   return { user, fest: f };
 }
+class OwnerOnly extends Error { constructor() { super('Only the fest’s owner can do this.'); } }
 const refresh = (festId: string) => revalidatePath(`/organizer/${festId}`, 'layout');
 
 const IST_TS = (date: string, hhmm: string) => new Date(`${date}T${hhmm}:00+05:30`);
@@ -251,7 +259,7 @@ export async function removeSponsor(fd: FormData) {
 export type PaymentsState = (ActionState & { result?: MatchResult }) | null;
 
 export async function saveUpiSettings(_: ActionState, fd: FormData): Promise<ActionState> {
-  const { fest } = await ownFest(fd);
+  const { fest } = await ownFest(fd, { ownerOnly: true });
   const enabled = fd.get('upi_enabled') === 'on';
   const vpa = s(fd, 'upi_vpa');
   const name = s(fd, 'upi_name').slice(0, 60);
@@ -317,7 +325,7 @@ export async function rejectUpiOrder(fd: FormData) {
 }
 
 export async function rotateInboundToken(fd: FormData) {
-  const { fest } = await ownFest(fd);
+  const { fest } = await ownFest(fd, { ownerOnly: true });
   await sql`update fests set inbound_token = ${newInboundToken()} where id = ${fest.id}`;
   refresh(fest.id);
 }
@@ -325,7 +333,7 @@ export async function rotateInboundToken(fd: FormData) {
 // ─── Refunds & cancellation ───────────────────────────────
 
 export async function refundOrderAction(_: ActionState, fd: FormData): Promise<ActionState> {
-  const { fest } = await ownFest(fd);
+  const { fest } = await ownFest(fd, { ownerOnly: true });
   const reason = s(fd, 'reason');
   const n = Number(s(fd, 'tickets') || 0);
   if (reason.length < 3) return { error: 'Add a short reason — the student sees it.' };
@@ -343,13 +351,13 @@ export async function refundOrderAction(_: ActionState, fd: FormData): Promise<A
 }
 
 export async function markUpiRefundSent(fd: FormData) {
-  const { fest } = await ownFest(fd);
+  const { fest } = await ownFest(fd, { ownerOnly: true });
   await sql`update orders set refund_status = 'done' where id = ${s(fd, 'orderId')} and fest_id = ${fest.id} and refund_status = 'manual_pending'`;
   refresh(fest.id);
 }
 
 export async function cancelFestAction(_: ActionState, fd: FormData): Promise<ActionState> {
-  const { fest } = await ownFest(fd);
+  const { fest } = await ownFest(fd, { ownerOnly: true });
   const reason = s(fd, 'reason');
   if (reason.length < 5) return { error: 'Tell students why the fest is cancelled.' };
   if (s(fd, 'confirm') !== 'CANCEL') return { error: 'Type CANCEL to confirm. This refunds every ticket and can’t be undone.' };
@@ -357,4 +365,53 @@ export async function cancelFestAction(_: ActionState, fd: FormData): Promise<Ac
   refresh(fest.id);
   revalidatePath(`/fests/${fest.slug}`);
   return { ok: true, message: `Fest cancelled. ${r.refunded} order(s) refunded${r.failed ? `, ${r.failed} gateway refund(s) failed (THE FEST will retry)` : ''}${r.skipped ? `, ${r.skipped} skipped (tickets already used)` : ''}.` };
+}
+
+// ─── Co-organizers ────────────────────────────────────────
+
+export async function addMember(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { user, fest } = await ownFest(fd, { ownerOnly: true });
+  const email = s(fd, 'email').toLowerCase();
+  if (!z.string().email().safeParse(email).success) return { error: 'Enter a valid email' };
+  if (email === user.email.toLowerCase()) return { error: 'You already own this fest.' };
+  const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from fest_members where fest_id = ${fest.id}`;
+  if (n >= 10) return { error: 'A fest can have up to 10 co-organizers.' };
+  const r = await sql`insert into fest_members (fest_id, email, added_by) values (${fest.id}, ${email}, ${user.id})
+                      on conflict (fest_id, email) do nothing returning id`;
+  if (!r.length) return { error: 'That email is already a co-organizer.' };
+  const [acct] = await sql<{ role: string }[]>`select role from users where email = ${email}`;
+  const site = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+  await sendEmail(email, `You’re now a co-organizer of ${fest.name}`, [
+    `${user.name} added you as a co-organizer of ${fest.name} on THE FEST.`,
+    '',
+    acct?.role === 'organizer'
+      ? `Log in to manage it: ${site}/login?next=/organizer/${fest.id}`
+      : `Create an organizer account with this email to get access: ${site}/signup?role=organizer`,
+    '',
+    '— THE FEST',
+  ].join('\n'));
+  refresh(fest.id);
+  return {
+    ok: true,
+    message: acct?.role === 'organizer' ? `${email} can now manage this fest.`
+      : acct ? `Added — but ${email} has a ${acct.role} account. They need an organizer account with this email to get in.`
+      : `Added. We’ve emailed ${email} to create an organizer account.`,
+  };
+}
+
+/** The owner can remove anyone; a co-organizer can remove themselves (leave). */
+export async function removeMember(fd: FormData) {
+  const { user, fest } = await ownFest(fd);
+  const id = s(fd, 'id');
+  if (!isUuid(id)) return;
+  if (fest.is_owner) await sql`delete from fest_members where id = ${id} and fest_id = ${fest.id}`;
+  else await sql`delete from fest_members where id = ${id} and fest_id = ${fest.id} and email = ${user.email}`;
+  refresh(fest.id);
+  if (!fest.is_owner) redirect('/organizer');
+}
+
+export async function setAllowTransfers(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`update fests set allow_transfers = ${fd.get('allow') === '1'} where id = ${fest.id}`;
+  refresh(fest.id);
 }

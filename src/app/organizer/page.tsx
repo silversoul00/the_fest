@@ -7,6 +7,7 @@ import { dateRange, num, rupees } from '@/lib/format';
 import { FestStatus } from '@/components/ui';
 import type { Fest } from '@/lib/types';
 import { logout } from '../(auth)/actions';
+import { canManage } from '@/lib/queries';
 
 export const metadata = { title: 'Your fests' };
 
@@ -16,7 +17,7 @@ export default async function OrganizerHome() {
     select f.*,
       (select count(*) from tickets t where t.fest_id = f.id and t.status <> 'void')::int as tickets,
       (select coalesce(sum(amount_paise - platform_fee_paise), 0) from orders o where o.fest_id = f.id and o.status = 'paid')::int as revenue
-    from fests f where f.organizer_id = ${user.id}
+    from fests f where ${canManage(user)}
     order by (f.status = 'ended'), f.starts_on`;
   if (fests.length === 0) redirect('/organizer/new');
   // One fest → straight to its dashboard

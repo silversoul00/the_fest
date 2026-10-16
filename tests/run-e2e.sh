@@ -40,4 +40,5 @@ export RACE_FEST=$(eval "$PSQL" -c "\"select id from fests where slug='neon-utsa
 export RACE_CODE=$(eval "$PSQL" -c "\"select code from tickets where fest_id='$RACE_FEST' and status='valid' limit 1\"")
 export RACE_TT=$(eval "$PSQL" -c "\"update ticket_types set quota = sold + 1 where fest_id=(select id from fests where slug='kalaa-fest') and name='Workshop Bundle' returning id\"")
 python3 tests/race.py
+python3 tests/team.py
 echo "✓ Release check passed"

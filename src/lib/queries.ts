@@ -27,12 +27,23 @@ export async function getFestBySlug(slug: string) {
 }
 
 /** Organizer-owned fest or 404. */
+/** SQL condition: `user` runs fest `f` — as its owner or as a co-organizer added by email. */
+export const canManage = (user: Pick<User, 'id' | 'email'>, alias = 'f') =>
+  sql`(${sql(alias)}.organizer_id = ${user.id} or exists (select 1 from fest_members m where m.fest_id = ${sql(alias)}.id and m.email = ${user.email}))`;
+
+/** A fest the user runs (owner or co-organizer). `is_owner` gates money and team settings. */
 export async function getOwnFest(festId: string, user: User) {
   if (!/^[0-9a-f-]{36}$/i.test(festId)) notFound();
-  const [f] = await sql<Fest[]>`select * from fests where id = ${festId} and organizer_id = ${user.id}`;
+  const [f] = await sql<(Fest & { is_owner: boolean })[]>`
+    select f.*, (f.organizer_id = ${user.id}) as is_owner from fests f where f.id = ${festId} and ${canManage(user)}`;
   if (!f) notFound();
   return f;
 }
+
+export const getMembers = (festId: string) =>
+  sql<{ id: string; email: string; created_at: Date; name: string | null }[]>`
+    select m.id, m.email::text, m.created_at, u.name from fest_members m left join users u on u.email = m.email
+    where m.fest_id = ${festId} order by m.created_at`;
 
 export const getTicketTypes = (festId: string) =>
   sql<TicketType[]>`select * from ticket_types where fest_id = ${festId} order by sort, price_paise`;
@@ -73,7 +84,7 @@ export async function festStats(festId: string) {
 /** Can this user scan for this fest? Organizer of the fest, or staff with can_scan. */
 export async function scannableFests(user: User) {
   return sql<(Fest & { duty: string | null })[]>`
-    select f.*, null::text as duty from fests f where f.organizer_id = ${user.id} and f.status in ('live', 'review', 'draft')
+    select f.*, null::text as duty from fests f where ${canManage(user)} and f.status in ('live', 'review', 'draft')
     union
     select f.*, s.duty from fests f join fest_staff s on s.fest_id = f.id
     where s.email = ${user.email} and s.can_scan and f.status in ('live', 'review', 'draft')

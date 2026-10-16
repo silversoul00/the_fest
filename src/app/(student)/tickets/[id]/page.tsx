@@ -7,6 +7,9 @@ import { dateRange, time } from '@/lib/format';
 import { signTicket } from '@/lib/ticket-crypto';
 import { isUuid } from '@/lib/http';
 import { AutoRefresh } from '@/components/AutoRefresh';
+import { ActionForm, Submit } from '@/components/forms';
+import { todayIST } from '@/lib/format';
+import { transferAction } from '../actions';
 
 export const metadata = { title: 'Ticket' };
 
@@ -18,12 +21,26 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
   const [t] = await sql<{
     id: string; code: string; holder_name: string; status: string; checked_in_at: Date | null; gate: string | null; fest_id: string;
     type_name: string; fest_name: string; slug: string; college: string; venue: string | null; city: string; starts_on: string; ends_on: string;
+    void_reason: string | null; fest_status: string; allow_transfers: boolean;
   }[]>`
     select t.id, t.code, t.holder_name, t.status, t.checked_in_at, t.gate, t.fest_id,
-           tt.name as type_name, f.name as fest_name, f.slug, f.college, f.venue, f.city, f.starts_on, f.ends_on
+           tt.name as type_name, f.name as fest_name, f.slug, f.college, f.venue, f.city, f.starts_on, f.ends_on,
+           t.void_reason, f.status as fest_status, f.allow_transfers
     from tickets t join ticket_types tt on tt.id = t.ticket_type_id join fests f on f.id = t.fest_id
     where t.id = ${id} and t.user_id = ${user.id}`;
   if (!t) notFound();
+  if (t.status === 'void') {
+    return (
+      <div className="wrap stack g16" style={{ maxWidth: 440 }}>
+        <Link href="/tickets" className="label">← My tickets</Link>
+        <div className="card stack g8">
+          <div className="h3">{t.fest_name} · {t.type_name}</div>
+          <p className="small soft">This ticket is no longer valid{t.void_reason ? ` — ${t.void_reason}` : ''}. Its QR code won’t scan.</p>
+        </div>
+      </div>
+    );
+  }
+  const canTransfer = t.status === 'valid' && t.allow_transfers && t.fest_status !== 'cancelled' && t.fest_status !== 'ended' && t.ends_on >= todayIST();
 
   const payload = signTicket(t.id, t.fest_id);
   const svg = await QRCode.toString(payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#080808', light: '#F5F0E8' } });
@@ -62,6 +79,18 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
         This QR is digitally signed and works once. Screenshots work too — but don&apos;t share it; whoever scans first gets in.
       </p>
       <Link href={`/fests/${t.slug}`} className="btn outline block">Fest schedule & updates</Link>
+      {canTransfer && (
+        <details className="card">
+          <summary className="small" style={{ cursor: 'pointer' }}>Can’t go? Transfer this ticket to a friend</summary>
+          <ActionForm action={transferAction} className="form mt12">
+            <input type="hidden" name="ticketId" value={t.id} />
+            <label className="field"><span>Friend’s email (their THE FEST account)</span>
+              <input className="input" type="email" name="email" autoComplete="off" placeholder="friend@college.edu" /></label>
+            <label className="check"><input type="checkbox" name="confirm" /> I understand my QR stops working and they get a new one</label>
+            <Submit className="btn sm">Transfer ticket</Submit>
+          </ActionForm>
+        </details>
+      )}
     </div>
   );
 }

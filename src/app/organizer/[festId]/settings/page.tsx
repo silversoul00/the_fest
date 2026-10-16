@@ -1,13 +1,14 @@
 import { requireUser } from '@/lib/auth';
-import { getOwnFest } from '@/lib/queries';
+import { getMembers, getOwnFest } from '@/lib/queries';
 import { FestForm } from '../../FestForm';
-import { cancelFestAction, setFestStatus, updateFest } from '../../actions';
+import { addMember, setAllowTransfers, cancelFestAction, removeMember, setFestStatus, updateFest } from '../../actions';
 import { ActionForm, Submit } from '@/components/forms';
 
 export default async function Settings({ params }: { params: Promise<{ festId: string }> }) {
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
   const site = process.env.NEXT_PUBLIC_SITE_URL ?? '';
+  const members = await getMembers(fest.id);
 
   const StatusBtn = ({ to, label, cls }: { to: string; label: string; cls: string }) => (
     <form action={setFestStatus}>
@@ -34,6 +35,17 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
           </div>
         </div>
         <div className="divider" style={{ margin: 0 }} />
+        <div className="row between wrap-row g8">
+          <div>
+            <div className="label">Ticket transfers</div>
+            <div className="small soft mt8">{fest.allow_transfers ? 'On — students can pass a ticket to a friend; the old QR stops working.' : 'Off — tickets stay with the buyer.'}</div>
+          </div>
+          <form action={setAllowTransfers}>
+            <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="allow" value={fest.allow_transfers ? '0' : '1'} />
+            <button className="btn sm outline">{fest.allow_transfers ? 'Turn off' : 'Turn on'}</button>
+          </form>
+        </div>
+        <div className="divider" style={{ margin: 0 }} />
         <div>
           <div className="label">Public link</div>
           <div className="mono small mt8 accent" style={{ wordBreak: 'break-all' }}>{site.replace(/^https?:\/\//, '')}/fests/{fest.slug}</div>
@@ -44,7 +56,34 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
         <div className="h3 mb16">Fest details</div>
         <FestForm action={updateFest} fest={fest} />
       </div>
-      {fest.status !== 'cancelled' && fest.status !== 'ended' && (
+      <div className="card stack g12" id="team">
+        <div className="h3">Co-organizers</div>
+        <p className="small soft">People who can run this fest with you: tickets, schedule, announcements, sponsors, volunteers, sales and UPI matching. Only you can change where money goes, refund, cancel the fest or change this list.</p>
+        {members.length === 0 ? <p className="small muted">Just you so far.</p> : (
+          <div className="stack g8">
+            {members.map((m) => (
+              <div key={m.id} className="row between g8 small member">
+                <span className="grow">{m.name ?? <span className="muted">Not signed up yet</span>} · <span className="mono">{m.email}</span></span>
+                {(fest.is_owner || m.email === user.email.toLowerCase()) && (
+                  <form action={removeMember}>
+                    <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={m.id} />
+                    <button className="btn sm outline">{fest.is_owner ? 'Remove' : 'Leave fest'}</button>
+                  </form>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {fest.is_owner && (
+          <ActionForm action={addMember}>
+            <input type="hidden" name="festId" value={fest.id} />
+            <label className="field"><span>Add by email</span><input className="input" type="email" name="email" placeholder="cofounder@college.edu" /></label>
+            <Submit className="btn sm">Add co-organizer</Submit>
+          </ActionForm>
+        )}
+      </div>
+
+      {fest.is_owner && fest.status !== 'cancelled' && fest.status !== 'ended' && (
         <div className="card stack g12" style={{ borderColor: 'rgba(255,45,85,.35)' }}>
           <div className="h3 c-red">Cancel this fest</div>
           <p className="small soft">Stops ticket sales and refunds every unused ticket in full. Card payments are refunded automatically; zero-fee UPI payments appear in Sales for you to send back. This can’t be undone.</p>

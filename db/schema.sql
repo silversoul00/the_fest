@@ -252,6 +252,7 @@ create index if not exists orders_upi_pending_idx on orders(fest_id, method, sta
 
 alter table tickets add column if not exists transferred_to uuid references tickets(id);
 alter table tickets add column if not exists void_reason    text;
+alter table fests   add column if not exists allow_transfers boolean not null default true;
 
 -- Bank credits seen by THE FEST (statement rows, alert emails, pasted SMS).
 -- One UTR can only ever confirm one order.

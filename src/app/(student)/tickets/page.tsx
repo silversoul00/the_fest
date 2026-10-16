@@ -14,9 +14,9 @@ type Row = {
   starts_on: string; ends_on: string; order_id: string;
 };
 
-export default async function MyTickets({ searchParams }: { searchParams: Promise<{ order?: string }> }) {
+export default async function MyTickets({ searchParams }: { searchParams: Promise<{ order?: string; sent?: string }> }) {
   const user = await requireUser('student');
-  const { order } = await searchParams;
+  const { order, sent } = await searchParams;
   const rows = await sql<Row[]>`
     select t.id, t.code, t.holder_name, t.status, t.checked_in_at, t.order_id,
            tt.name as type_name, f.name as fest_name, f.slug, f.emoji, f.accent, f.college, f.starts_on, f.ends_on
@@ -50,6 +50,7 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
       <h1 className="h2 mt8">My tickets</h1>
       {pending.some((p) => p.utr) && <AutoRefresh seconds={10} />}
 
+      {sent && <div className="alert ok">Ticket sent to {sent.slice(0, 60)}. Their new QR is in their account.</div>}
       {fresh.length > 0 && (
         <div className="alert ok">🎉 You&apos;re in! {fresh.length} ticket{fresh.length > 1 ? 's' : ''} for {fresh[0].fest_name}. Show the QR at the gate.</div>
       )}
