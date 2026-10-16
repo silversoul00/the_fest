@@ -1,0 +1,237 @@
+'use server';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import { z } from 'zod';
+import { requireUser } from '@/lib/auth';
+import { sql } from '@/lib/db';
+import { slugify } from '@/lib/format';
+import { boothCode } from '@/lib/ticket-crypto';
+import { isUuid } from '@/lib/http';
+import type { ActionState } from '@/lib/types';
+
+// ─── helpers ──────────────────────────────────────────────
+const s = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
+const rupeesToPaise = (v: string) => Math.round(Number(v || 0) * 100);
+const first = (e: z.ZodError) => ({ error: e.issues[0].message });
+
+/** Ensures the signed-in organizer owns the fest named in the form. */
+async function ownFest(fd: FormData) {
+  const user = await requireUser('organizer');
+  const festId = s(fd, 'festId');
+  if (!isUuid(festId)) throw new Error('Fest not found');
+  const [f] = await sql<{ id: string; slug: string; starts_on: string; ends_on: string }[]>`
+    select id, slug, starts_on, ends_on from fests where id = ${festId} and organizer_id = ${user.id}`;
+  if (!f) throw new Error('Fest not found');
+  return { user, fest: f };
+}
+const refresh = (festId: string) => revalidatePath(`/organizer/${festId}`, 'layout');
+
+const IST_TS = (date: string, hhmm: string) => new Date(`${date}T${hhmm}:00+05:30`);
+
+// ─── Fest ─────────────────────────────────────────────────
+const FestSchema = z.object({
+  name: z.string().trim().min(3, 'Fest name is too short').max(60),
+  college: z.string().trim().min(3, 'Enter the college name').max(120),
+  city: z.string().trim().min(2, 'Enter the city').max(60),
+  venue: z.string().trim().max(120).optional(),
+  category: z.enum(['cultural', 'tech', 'sports', 'management', 'other']),
+  starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Pick a start date'),
+  ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Pick an end date'),
+  description: z.string().trim().max(2000).optional(),
+  emoji: z.string().trim().min(1).max(8).default('🎉'),
+  accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#FFE034'),
+  capacity: z.string().optional(),
+}).refine((d) => d.ends_on >= d.starts_on, { message: 'End date must be on or after the start date' });
+
+export async function createFest(_: ActionState, fd: FormData): Promise<ActionState> {
+  const user = await requireUser('organizer');
+  const p = FestSchema.safeParse(Object.fromEntries(fd));
+  if (!p.success) return first(p.error);
+  const d = p.data;
+
+  const tName = s(fd, 'ticket_name') || 'General Entry';
+  const tPrice = rupeesToPaise(s(fd, 'ticket_price'));
+  const tQuota = Number(s(fd, 'ticket_quota') || 500);
+  if (tPrice < 0 || tPrice > 10_000_00) return { error: 'Ticket price must be between ₹0 and ₹10,000' };
+  if (!Number.isInteger(tQuota) || tQuota < 1 || tQuota > 100000) return { error: 'Ticket quantity must be between 1 and 100,000' };
+
+  // Unique slug: name, then name-year, then name-random
+  let slug = slugify(s(fd, 'slug') || d.name);
+  if (slug.length < 3) slug = `${slug}-fest`;
+  const taken = async (x: string) => (await sql`select 1 from fests where slug = ${x}`).length > 0;
+  if (await taken(slug)) slug = `${slug}-${d.starts_on.slice(0, 4)}`.slice(0, 48);
+  while (await taken(slug)) slug = `${slug.slice(0, 42)}-${Math.random().toString(36).slice(2, 6)}`;
+
+  const capacity = d.capacity ? Number(d.capacity) : null;
+  const [f] = await sql<{ id: string }[]>`
+    insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity)
+    values (${slug}, ${user.id}, ${d.name}, ${d.college}, ${d.city}, ${d.venue || null}, ${d.category}, ${d.starts_on}, ${d.ends_on},
+            ${d.description ?? ''}, ${d.emoji}, ${d.accent}, ${capacity && capacity > 0 ? capacity : null})
+    returning id`;
+  await sql`insert into ticket_types (fest_id, name, price_paise, quota) values (${f.id}, ${tName}, ${tPrice}, ${tQuota})`;
+  redirect(`/organizer/${f.id}?created=1`);
+}
+
+export async function updateFest(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const p = FestSchema.safeParse(Object.fromEntries(fd));
+  if (!p.success) return first(p.error);
+  const d = p.data;
+  const capacity = d.capacity ? Number(d.capacity) : null;
+  await sql`update fests set name = ${d.name}, college = ${d.college}, city = ${d.city}, venue = ${d.venue || null},
+              category = ${d.category}, starts_on = ${d.starts_on}, ends_on = ${d.ends_on}, description = ${d.description ?? ''},
+              emoji = ${d.emoji}, accent = ${d.accent}, capacity = ${capacity && capacity > 0 ? capacity : null}
+            where id = ${fest.id}`;
+  refresh(fest.id);
+  return { ok: true, message: 'Saved.' };
+}
+
+export async function setFestStatus(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  const status = s(fd, 'status');
+  if (!['draft', 'live', 'ended'].includes(status)) return;
+  if (status === 'live') {
+    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active`;
+    if (!n) return; // UI prevents this; nothing to sell
+  }
+  await sql`update fests set status = ${status}::fest_status where id = ${fest.id}`;
+  refresh(fest.id);
+}
+
+// ─── Ticket types ─────────────────────────────────────────
+const TicketSchema = z.object({
+  name: z.string().trim().min(2, 'Name the ticket').max(60),
+  description: z.string().trim().max(200).optional(),
+  price: z.string().regex(/^\d+(\.\d{1,2})?$/, 'Enter a price in rupees (0 for free)'),
+  quota: z.coerce.number().int('Quantity must be a whole number').min(1, 'Quantity must be at least 1').max(100000),
+});
+
+export async function addTicketType(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const p = TicketSchema.safeParse(Object.fromEntries(fd));
+  if (!p.success) return first(p.error);
+  const price = rupeesToPaise(p.data.price);
+  if (price > 10_000_00) return { error: 'Max ticket price is ₹10,000' };
+  await sql`insert into ticket_types (fest_id, name, description, price_paise, quota, sort)
+            values (${fest.id}, ${p.data.name}, ${p.data.description ?? ''}, ${price}, ${p.data.quota},
+                    (select coalesce(max(sort), 0) + 1 from ticket_types where fest_id = ${fest.id}))`;
+  refresh(fest.id);
+  return { ok: true, message: 'Ticket type added.' };
+}
+
+export async function updateTicketType(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const p = TicketSchema.safeParse(Object.fromEntries(fd));
+  if (!p.success) return first(p.error);
+  const id = s(fd, 'id');
+  const [t] = await sql<{ sold: number }[]>`select sold from ticket_types where id = ${id} and fest_id = ${fest.id}`;
+  if (!t) return { error: 'Ticket type not found' };
+  if (p.data.quota < t.sold) return { error: `Already ${t.sold} sold — quantity can't go below that.` };
+  const price = rupeesToPaise(p.data.price);
+  await sql`update ticket_types set name = ${p.data.name}, description = ${p.data.description ?? ''},
+              price_paise = ${price}, quota = ${p.data.quota} where id = ${id}`;
+  refresh(fest.id);
+  return { ok: true, message: 'Updated.' };
+}
+
+export async function toggleTicketType(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`update ticket_types set active = not active where id = ${s(fd, 'id')} and fest_id = ${fest.id}`;
+  refresh(fest.id);
+}
+
+// ─── Schedule ─────────────────────────────────────────────
+export async function addEvent(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const title = s(fd, 'title'), venue = s(fd, 'venue'), date = s(fd, 'date'), start = s(fd, 'start'), end = s(fd, 'end');
+  if (title.length < 2) return { error: 'Enter an event title' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return { error: 'Pick a date, start and end time' };
+  if (date < fest.starts_on || date > fest.ends_on) return { error: 'Date must be within the fest dates' };
+  const a = IST_TS(date, start);
+  let b = IST_TS(date, end);
+  if (b <= a) b = new Date(b.getTime() + 864e5); // ends after midnight
+  await sql`insert into schedule_events (fest_id, title, venue, category, starts_at, ends_at)
+            values (${fest.id}, ${title.slice(0, 120)}, ${venue.slice(0, 120)}, ${s(fd, 'category') || 'event'}, ${a}, ${b})`;
+  refresh(fest.id);
+  return { ok: true, message: 'Added to schedule.' };
+}
+
+export async function deleteEvent(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`delete from schedule_events where id = ${s(fd, 'id')} and fest_id = ${fest.id}`;
+  refresh(fest.id);
+}
+
+// ─── Volunteers ───────────────────────────────────────────
+export async function addStaff(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const email = s(fd, 'email').toLowerCase();
+  const name = s(fd, 'name');
+  if (!z.string().email().safeParse(email).success) return { error: 'Enter a valid email' };
+  if (name.length < 2) return { error: 'Enter the volunteer’s name' };
+  const duty = s(fd, 'duty') || 'Gate 1';
+  const canScan = fd.get('can_scan') === 'on';
+  const r = await sql`insert into fest_staff (fest_id, email, name, duty, can_scan)
+                      values (${fest.id}, ${email}, ${name.slice(0, 80)}, ${duty.slice(0, 60)}, ${canScan})
+                      on conflict (fest_id, email) do nothing returning id`;
+  if (!r.length) return { error: 'That email is already on your team' };
+  refresh(fest.id);
+  return { ok: true, message: `${name} added. They log in to the scanner with ${email}.` };
+}
+
+export async function toggleStaffCheckin(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`update fest_staff set checked_in_at = case when checked_in_at is null then now() else null end
+            where id = ${s(fd, 'id')} and fest_id = ${fest.id}`;
+  refresh(fest.id);
+}
+
+export async function removeStaff(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`delete from fest_staff where id = ${s(fd, 'id')} and fest_id = ${fest.id}`;
+  refresh(fest.id);
+}
+
+// ─── Announcements ────────────────────────────────────────
+export async function postAnnouncement(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const title = s(fd, 'title');
+  if (title.length < 3) return { error: 'Write a short headline' };
+  await sql`insert into announcements (fest_id, title, body, urgent)
+            values (${fest.id}, ${title.slice(0, 120)}, ${s(fd, 'body').slice(0, 1000)}, ${fd.get('urgent') === 'on'})`;
+  refresh(fest.id);
+  revalidatePath(`/fests/${fest.slug}`);
+  return { ok: true, message: 'Posted — it’s live on your fest page.' };
+}
+
+export async function deleteAnnouncement(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`delete from announcements where id = ${s(fd, 'id')} and fest_id = ${fest.id}`;
+  refresh(fest.id);
+}
+
+// ─── Sponsors ─────────────────────────────────────────────
+export async function addSponsor(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  const brand = s(fd, 'brand');
+  const email = s(fd, 'email').toLowerCase();
+  if (brand.length < 2) return { error: 'Enter the brand name' };
+  if (!z.string().email().safeParse(email).success) return { error: 'Enter the sponsor’s email' };
+  const tier = s(fd, 'tier') || 'Associate';
+  const amount = rupeesToPaise(s(fd, 'amount'));
+  if (!Number.isFinite(amount) || amount < 0) return { error: 'Enter the deal amount in rupees' };
+  try {
+    await sql`insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code)
+              values (${fest.id}, ${email}, ${brand.slice(0, 80)}, ${tier.slice(0, 40)}, ${amount}, ${boothCode()})`;
+  } catch {
+    return { error: 'This sponsor is already added' };
+  }
+  refresh(fest.id);
+  return { ok: true, message: `${brand} added. They sign up as a Sponsor with ${email} to see live numbers.` };
+}
+
+export async function removeSponsor(fd: FormData) {
+  const { fest } = await ownFest(fd);
+  await sql`delete from sponsors where id = ${s(fd, 'id')} and fest_id = ${fest.id}`;
+  refresh(fest.id);
+}

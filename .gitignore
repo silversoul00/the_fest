@@ -1,5 +1,14 @@
 .DS_Store
 node_modules/
+.next/
+out/
 .vercel/
 .netlify/
 *.log
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets
+.env
+.env.local
+.env.*.local
