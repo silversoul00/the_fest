@@ -1,3 +1,4 @@
+import { SiteFooter } from '@/components/Legal';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getUser, PORTAL } from '@/lib/auth';
@@ -75,10 +76,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <footer className="wrap row between wrap-row g12" style={{ borderTop: '1px solid var(--border)', padding: '20px var(--gutter) 32px' }}>
-        <span className="label">© THE FEST · Bengaluru</span>
-        <span className="label">thefest.in</span>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

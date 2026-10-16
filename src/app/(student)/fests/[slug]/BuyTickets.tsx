@@ -189,6 +189,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
           {busy ? 'Opening payment…' : !q || q.total === 0 ? 'Get free ticket →' : method === 'upi_direct' ? `Pay ${rupees(q.total)} by UPI →` : `Pay ${rupees(q.total)} →`}
         </button>
       )}
+      {signedIn && isStudent && <p className="xs muted" style={{ textAlign: 'center' }}>By continuing you agree to the <Link href="/legal/terms" className="soft">terms</Link> and <Link href="/legal/refunds" className="soft">refund policy</Link>.</p>}
       {gateway === 'demo' && signedIn && isStudent && isPaid && method === 'gateway' && <p className="xs muted" style={{ textAlign: 'center' }}>Card checkout is in demo mode — no money is charged.</p>}
     </div>
   );

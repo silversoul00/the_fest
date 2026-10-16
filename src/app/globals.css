@@ -273,3 +273,12 @@ img, svg { display: block; max-width: 100%; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg label:has(input:checked) { background: var(--yellow); color: var(--black); font-weight: 700; }
 .seg .e { display: block; font-size: 18px; margin-bottom: 4px; }
+
+/* Policy pages */
+.legal { color: var(--soft); font-size: 15px; line-height: 1.7; }
+.legal h2 { font-family: var(--f-display); font-weight: 400; letter-spacing: .04em; font-size: 24px; color: var(--white, #fff); margin: 32px 0 8px; }
+.legal p, .legal ul { margin: 0 0 12px; }
+.legal ul { padding-left: 20px; }
+.legal li { margin-bottom: 6px; }
+.legal b { color: var(--white, #fff); font-weight: 600; }
+.legal a { color: var(--accent); }

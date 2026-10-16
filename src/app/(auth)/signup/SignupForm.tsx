@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { ActionForm, Submit } from '@/components/forms';
 import { signup } from '../actions';
 
@@ -43,6 +44,7 @@ export function SignupForm({ initialRole, next }: { initialRole: string; next: s
         <input className="input" type="password" name="password" autoComplete="new-password" required minLength={8} placeholder="At least 8 characters" />
       </label>
       <Submit pendingText="Creating account…">Create account →</Submit>
+      <p className="xs muted">By signing up you agree to the <Link href="/legal/terms" className="soft">terms</Link> and <Link href="/legal/privacy" className="soft">privacy policy</Link>.</p>
       {role === 'sponsor' && (
         <p className="xs muted">Use the email the fest organizer added you with — your sponsored fests appear automatically.</p>
       )}
