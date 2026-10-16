@@ -16,8 +16,8 @@ const TABS = [
   { seg: '/settings', icon: '⚙️', label: 'Settings' },
 ];
 
-export function OrgShell({ festId, festName, slug, status, fests, userName, logoutAction, children }: {
-  festId: string; festName: string; slug: string; status: string; fests: OrgFestLink[]; userName: string;
+export function OrgShell({ festId, festName, slug, status, fests, userName, isAdmin, logoutAction, children }: {
+  festId: string; festName: string; slug: string; status: string; fests: OrgFestLink[]; userName: string; isAdmin?: boolean;
   logoutAction: () => Promise<void>; children: React.ReactNode;
 }) {
   const path = usePathname();
@@ -32,7 +32,7 @@ export function OrgShell({ festId, festName, slug, status, fests, userName, logo
         <div className="card tight" style={{ margin: '0 4px 8px' }}>
           <div className="display truncate" style={{ fontSize: 20 }}>{festName}</div>
           <div className="row g8 mt8">
-            <span className={`badge ${status === 'live' ? 'green' : status === 'draft' ? 'gray' : 'gray'}`}>{status}</span>
+            <span className={`badge ${status === 'live' ? 'green' : status === 'review' ? 'blue' : status === 'cancelled' ? 'red' : 'gray'}`}>{status === 'review' ? 'in review' : status}</span>
             <Link href={`/fests/${slug}`} className="xs accent">View page ↗</Link>
           </div>
         </div>
@@ -52,6 +52,7 @@ export function OrgShell({ festId, festName, slug, status, fests, userName, logo
         )}
         <Link href="/organizer/new" className="side-link"><span className="i">＋</span>New fest</Link>
         <Link href="/scan/login" className="side-link"><span className="i">📷</span>Gate scanner</Link>
+        {isAdmin && <Link href="/admin" className="side-link"><span className="i">🛡️</span>THE FEST admin</Link>}
         <div className="grow" />
         <div className="row g8" style={{ padding: '12px', borderTop: '1px solid var(--border)' }}>
           <span className="small truncate grow">{userName}</span>

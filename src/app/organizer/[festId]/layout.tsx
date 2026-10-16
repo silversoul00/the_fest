@@ -11,7 +11,7 @@ export default async function FestLayout({ children, params }: { children: React
   const fests = await sql<{ id: string; name: string }[]>`select id, name from fests where organizer_id = ${user.id} order by starts_on desc`;
 
   return (
-    <OrgShell festId={fest.id} festName={fest.name} slug={fest.slug} status={fest.status} fests={[...fests]} userName={user.name} logoutAction={logout}>
+    <OrgShell festId={fest.id} festName={fest.name} slug={fest.slug} status={fest.status} fests={[...fests]} userName={user.name} isAdmin={!!user.is_admin} logoutAction={logout}>
       {children}
     </OrgShell>
   );

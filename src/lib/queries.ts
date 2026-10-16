@@ -73,9 +73,9 @@ export async function festStats(festId: string) {
 /** Can this user scan for this fest? Organizer of the fest, or staff with can_scan. */
 export async function scannableFests(user: User) {
   return sql<(Fest & { duty: string | null })[]>`
-    select f.*, null::text as duty from fests f where f.organizer_id = ${user.id} and f.status <> 'ended'
+    select f.*, null::text as duty from fests f where f.organizer_id = ${user.id} and f.status in ('live', 'review', 'draft')
     union
     select f.*, s.duty from fests f join fest_staff s on s.fest_id = f.id
-    where s.email = ${user.email} and s.can_scan and f.status <> 'ended'
+    where s.email = ${user.email} and s.can_scan and f.status in ('live', 'review', 'draft')
     order by starts_on`;
 }

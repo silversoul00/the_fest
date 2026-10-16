@@ -8,6 +8,7 @@ export interface User {
   college: string | null;
   role: Role;
   created_at: Date;
+  is_admin?: boolean;
 }
 
 export interface Fest {

@@ -21,7 +21,7 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
   const fest = await getFestBySlug(slug);
   const user = await getUser();
   // Drafts are visible only to their organizer (preview)
-  if (!fest || (fest.status === 'draft' && fest.organizer_id !== user?.id)) notFound();
+  if (!fest || ((fest.status === 'draft' || fest.status === 'review') && fest.organizer_id !== user?.id && !user?.is_admin)) notFound();
 
   const [types, schedule, news] = await Promise.all([getTicketTypes(fest.id), getSchedule(fest.id), getAnnouncements(fest.id, 5)]);
 
@@ -44,7 +44,7 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
       <div className="wrap" style={{ marginTop: -36, position: 'relative', zIndex: 2 }}>
         {isOwner && (
           <div className="alert info mb16 row between g8 wrap-row">
-            <span>You&apos;re viewing your fest{fest.status === 'draft' ? ' (draft — only you can see it)' : ''}.</span>
+            <span>You&apos;re viewing your fest{fest.status === 'draft' ? ' (draft — only you can see it)' : fest.status === 'review' ? ' (waiting for THE FEST approval — not public yet)' : ''}.</span>
             <Link href={`/organizer/${fest.id}`} className="accent">Back to dashboard →</Link>
           </div>
         )}

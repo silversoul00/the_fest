@@ -39,6 +39,8 @@ export default async function Me() {
         </a>
       )}
 
+      {user.is_admin && <a href="/admin" className="btn outline block">🛡️ THE FEST admin</a>}
+
       <form action={logout}>
         <button className="btn danger block" type="submit">Log out</button>
       </form>

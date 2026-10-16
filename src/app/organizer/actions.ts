@@ -93,11 +93,16 @@ export async function setFestStatus(fd: FormData) {
   const { fest } = await ownFest(fd);
   const status = s(fd, 'status');
   if (!['draft', 'live', 'ended'].includes(status)) return;
+  const [cur] = await sql<{ status: string; approved_at: Date | null }[]>`select status, approved_at from fests where id = ${fest.id}`;
+  if (cur.status === 'cancelled') return; // cancelled fests stay cancelled
+  let next = status;
   if (status === 'live') {
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active`;
     if (!n) return; // UI prevents this; nothing to sell
+    // New fests are checked by THE FEST before tickets go on sale (stops fake fests taking students' money)
+    if (!cur.approved_at && process.env.REQUIRE_FEST_APPROVAL !== 'false') next = 'review';
   }
-  await sql`update fests set status = ${status}::fest_status where id = ${fest.id}`;
+  await sql`update fests set status = ${next}::fest_status, review_note = case when ${next} = 'review' then null else review_note end where id = ${fest.id}`;
   refresh(fest.id);
 }
 

@@ -56,14 +56,24 @@ export default async function Overview({ params, searchParams }: { params: Promi
         <div className="card row between wrap-row g12" style={{ borderColor: 'rgba(255,224,52,.3)' }}>
           <div>
             <div className="h3">Your fest is a draft</div>
-            <div className="small soft">Only you can see it. Publish to start selling tickets.</div>
+            <div className="small soft">
+              {fest.review_note
+                ? <>THE FEST sent it back: <span className="c-orange">{fest.review_note}</span> Fix this, then submit again.</>
+                : fest.approved_at ? 'Only you can see it. Publish to start selling tickets again.' : 'Only you can see it. Submit it for a quick check by THE FEST — tickets go on sale once approved (usually within a day).'}
+            </div>
           </div>
           <form action={setFestStatus}>
             <input type="hidden" name="festId" value={fest.id} />
             <input type="hidden" name="status" value="live" />
-            <button className="btn green" disabled={!types[0].n}>Publish fest →</button>
+            <button className="btn green" disabled={!types[0].n}>{fest.approved_at ? 'Publish fest →' : 'Submit for approval →'}</button>
           </form>
         </div>
+      )}
+      {fest.status === 'review' && (
+        <div className="alert info">Your fest is waiting for THE FEST&apos;s approval. You can keep editing everything meanwhile — you&apos;ll see it go live here once approved.</div>
+      )}
+      {fest.status === 'cancelled' && (
+        <div className="alert error">This fest was cancelled{fest.cancelled_reason ? `: ${fest.cancelled_reason}` : ''}. Ticket sales are closed.</div>
       )}
 
       <div className="row between wrap-row g8">

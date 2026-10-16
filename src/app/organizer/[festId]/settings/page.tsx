@@ -24,12 +24,12 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
         <div className="row between wrap-row g8">
           <div>
             <div className="label">Status</div>
-            <div className="h3 mt8">{fest.status === 'live' ? 'Live — tickets on sale' : fest.status === 'draft' ? 'Draft — only you can see it' : 'Ended'}</div>
+            <div className="h3 mt8">{{ live: 'Live — tickets on sale', draft: 'Draft — only you can see it', review: 'Waiting for THE FEST approval', ended: 'Ended', cancelled: 'Cancelled' }[fest.status]}</div>
           </div>
           <div className="row g8 wrap-row">
-            {fest.status !== 'live' && <StatusBtn to="live" label={fest.status === 'ended' ? 'Reopen' : 'Publish'} cls="green" />}
-            {fest.status === 'live' && <StatusBtn to="draft" label="Unpublish" cls="outline" />}
-            {fest.status !== 'ended' && <StatusBtn to="ended" label="End fest" cls="danger" />}
+            {(fest.status === 'draft' || fest.status === 'ended') && <StatusBtn to="live" label={fest.status === 'ended' ? 'Reopen' : fest.approved_at ? 'Publish' : 'Submit for approval'} cls="green" />}
+            {(fest.status === 'live' || fest.status === 'review') && <StatusBtn to="draft" label={fest.status === 'review' ? 'Withdraw' : 'Unpublish'} cls="outline" />}
+            {(fest.status === 'live' || fest.status === 'draft') && <StatusBtn to="ended" label="End fest" cls="danger" />}
           </div>
         </div>
         <div className="divider" style={{ margin: 0 }} />

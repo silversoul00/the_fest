@@ -29,6 +29,8 @@ export const catLabel = (c: string) => CAT_LABEL[c] ?? c;
 export function FestStatus({ fest }: { fest: Pick<Fest, 'status' | 'starts_on' | 'ends_on'> }) {
   const today = todayIST();
   if (fest.status === 'draft') return <span className="badge gray">Draft</span>;
+  if (fest.status === 'review') return <span className="badge blue">In review</span>;
+  if (fest.status === 'cancelled') return <span className="badge red">Cancelled</span>;
   if (fest.status === 'ended' || fest.ends_on < today) return <span className="badge gray">Ended</span>;
   if (fest.starts_on <= today) return <span className="badge green"><span className="dot live" />Live now</span>;
   return <span className="badge yellow">On sale</span>;

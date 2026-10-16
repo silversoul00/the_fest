@@ -44,7 +44,7 @@ try {
       console.error('Refusing to --reset a Supabase database. Add --yes-really if you are sure.');
       process.exit(1);
     }
-    await sql`truncate sponsor_visits, sponsors, announcements, schedule_events, fest_staff, scans, tickets, orders, ticket_types, fests, sessions, users restart identity cascade`;
+    await sql`truncate payouts, upi_credits, fest_members, password_resets, email_outbox, sponsor_visits, sponsors, announcements, schedule_events, fest_staff, scans, tickets, orders, ticket_types, fests, sessions, users restart identity cascade`;
     console.log('• wiped');
   }
 
@@ -57,6 +57,8 @@ try {
   const student = await mkUser('student@thefest.in', 'Arjun Sharma', 'student', COLLEGES[2]);
   await mkUser('sponsor@thefest.in', 'Neha Brand Manager', 'sponsor');
   const volunteer = await mkUser('volunteer@thefest.in', 'Kiran Volunteer', 'student', COLLEGES[0]);
+  const admin = await mkUser('admin@thefest.in', 'THE FEST Admin', 'organizer');
+  await sql`update users set is_admin = true where id = ${admin}`;
 
   // ~120 attendees
   const crowd = [];
@@ -78,6 +80,9 @@ try {
     { slug: 'commerce-carnival', org: organizer2, name: 'Commerce Carnival', college: COLLEGES[2], city: 'Bengaluru', venue: 'Auditorium & Quad', category: 'management', s: 34, e: 35, emoji: '📈', accent: '#00E5A0', cap: 1200,
       desc: 'B-plan battles, a mock stock exchange and the best-manager hunt. Sample data.',
       types: [['Delegate', 'All events + lunch', 49900, 800]] },
+    { slug: 'campus-beats', org: organizer2, name: 'Campus Beats', college: COLLEGES[3], city: 'Bengaluru', venue: 'Amphitheatre', category: 'cultural', s: 45, e: 46, emoji: '🎤', accent: '#B794F6', cap: 1500,
+      desc: 'Battle of the bands and a DJ night. Waiting for THE FEST approval — sample data.',
+      types: [['Entry', 'Both days', 19900, 1000]], status: 'review' },
     { slug: 'goal-rush', org: organizer, name: 'Goal Rush', college: COLLEGES[3], city: 'Bengaluru', venue: 'Sports Complex', category: 'sports', s: -40, e: -38, emoji: '⚽', accent: '#FF2D55', cap: 1000,
       desc: 'Inter-college football and futsal. This one already happened — sample data.',
       types: [['Spectator', 'All matches', 9900, 900]], status: 'ended' },
@@ -87,8 +92,8 @@ try {
   const typeIds = {};
   for (const f of FESTS) {
     const [row] = await sql`
-      insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity, status)
-      values (${f.slug}, ${f.org}, ${f.name}, ${f.college}, ${f.city}, ${f.venue}, ${f.category}, ${day(f.s)}, ${day(f.e)}, ${f.desc}, ${f.emoji}, ${f.accent}, ${f.cap}, ${f.status ?? 'live'})
+      insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity, status, approved_at)
+      values (${f.slug}, ${f.org}, ${f.name}, ${f.college}, ${f.city}, ${f.venue}, ${f.category}, ${day(f.s)}, ${day(f.e)}, ${f.desc}, ${f.emoji}, ${f.accent}, ${f.cap}, ${f.status ?? 'live'}, ${f.status === 'review' ? null : new Date()})
       returning id`;
     festIds[f.slug] = row.id;
     typeIds[f.slug] = [];
@@ -215,7 +220,7 @@ try {
 
   const [{ t }] = await sql`select count(*)::int as t from tickets`;
   console.log(`✓ Seeded ${FESTS.length} fests, ${crowd.length + 5} users, ${t} tickets`);
-  console.log('  Demo logins (password123): student@ · organizer@ · sponsor@ · volunteer@thefest.in');
+  console.log('  Demo logins (password123): student@ · organizer@ · sponsor@ · volunteer@ · admin@thefest.in');
 } catch (e) {
   console.error('✗ Seed failed:', e);
   process.exitCode = 1;

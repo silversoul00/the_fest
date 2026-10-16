@@ -42,6 +42,7 @@ async def main():
         f = org.locator('form:has(button:has-text("Add ticket type"))')
         await f.locator('input[name=name]').fill('Early Bird'); await f.locator('input[name=price]').fill('199'); await f.locator('input[name=quota]').fill('50')
         await f.locator('button[type=submit]').click(); await org.wait_for_selector('text=Ticket type added.')
+        await org.wait_for_selector('strong:has-text("Early Bird")', timeout=10000)
         check('add ticket type', await org.locator('strong:has-text("Early Bird")').count() == 1)
         # bad input
         await f.locator('input[name=name]').fill('X'); await f.locator('input[name=price]').fill('10'); await f.locator('input[name=quota]').fill('5')
@@ -88,8 +89,30 @@ async def main():
         await org.click('button:has-text("Create fest")'); await org.wait_for_url('**/organizer/*?created=1')
         newfest = org.url.split('/organizer/')[1].split('?')[0]
         check('create fest → draft dashboard', await org.locator('text=Your fest is a draft').count() == 1)
-        await org.click('button:has-text("Publish fest")'); await org.wait_for_load_state('networkidle')
-        check('publish fest', await org.locator('text=Your fest is a draft').count() == 0)
+        await org.click('button:has-text("Submit for approval")'); await org.wait_for_load_state('networkidle')
+        check('new fest goes to review, not straight live', await org.locator('text=waiting for THE FEST').count() >= 1)
+        r = await org.goto(f'{B}/admin'); check('organizer (non-admin) blocked from /admin', '/admin' not in org.url, org.url)
+        # ── ADMIN approves it ──
+        ac = await browser.new_context(viewport={'width': 1280, 'height': 900}); adm = await ac.new_page(); watch(adm, errs)
+        await login(adm, 'admin@thefest.in', url='/login?next=/admin')
+        check('admin sees review queue', await adm.locator('text=Test Fest E2E').count() >= 1 and await adm.locator('text=Campus Beats').count() >= 1)
+        card = adm.locator('.card', has_text='Campus Beats').first
+        await card.locator('input[name=note]').fill('Add your college ID proof and a real venue'); await card.locator('button:has-text("Send back")').click()
+        await adm.locator('.card', has_text='Campus Beats').wait_for(state='detached', timeout=10000)
+        check('admin sends fest back with a note', True)
+        card = adm.locator('.card', has_text='Test Fest E2E').first
+        await card.locator('button:has-text("Approve")').click()
+        await adm.locator('.card', has_text='Test Fest E2E').wait_for(state='detached', timeout=10000)
+        check('admin approves fest', True)
+        await adm.goto(f'{B}/admin/fests')
+        check('admin fests & payouts page', await adm.locator('text=Record a payout').count() == 1)
+        neon_val = await adm.evaluate("[...document.querySelectorAll('select[name=festId] option')].find(o => o.textContent.startsWith('Neon Utsav')).value")
+        await adm.select_option('select[name=festId]', value=neon_val)
+        await adm.fill('input[name=amount]', '5000'); await adm.fill('input[name=reference]', '612345678999')
+        await adm.click('button:has-text("Record payout")'); await adm.wait_for_selector('text=Recorded ₹5,000')
+        check('admin records payout', True)
+        await adm.goto(f'{B}/admin/orders?q=student@thefest.in')
+        check('admin order search', await adm.locator('td', has_text='student@thefest.in').count() >= 1)
         # desktop screenshot
         await org.set_viewport_size({'width': 1366, 'height': 900})
         await org.goto(f'{B}/organizer/{neon}'); await org.screenshot(path=S + 'o_overview_desktop.png', full_page=True)

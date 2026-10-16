@@ -64,10 +64,12 @@ async function userFromCookie(name: string, kind: 'app' | 'scanner'): Promise<Us
   const token = jar.get(name)?.value;
   if (!token) return null;
   const rows = await sql<User[]>`
-    select u.id, u.email::text, u.name, u.phone, u.college, u.role, u.created_at
+    select u.id, u.email::text, u.name, u.phone, u.college, u.role, u.created_at, u.is_admin
     from sessions s join users u on u.id = s.user_id
     where s.token_hash = ${sha256(token)} and s.kind = ${kind} and s.expires_at > now()`;
-  return rows[0] ?? null;
+  const u = rows[0];
+  if (!u) return null;
+  return { ...u, is_admin: u.is_admin || adminEmails().includes(u.email.toLowerCase()) };
 }
 
 /** Current app user (memoised per request). */
@@ -87,6 +89,16 @@ export async function requireUser(role?: Role): Promise<User> {
   const user = await getUser();
   if (!user) redirect('/login');
   if (role && user.role !== role) redirect(PORTAL[user.role]);
+  return user;
+}
+
+/** Platform admins: users.is_admin, or emails listed in ADMIN_EMAILS (comma-separated). */
+export const adminEmails = () => (process.env.ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+
+export async function requireAdmin(): Promise<User> {
+  const user = await getUser();
+  if (!user) redirect('/login?next=/admin');
+  if (!user.is_admin) redirect(PORTAL[user.role]);
   return user;
 }
 
