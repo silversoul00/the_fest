@@ -12,6 +12,7 @@ Your job is to make sure what was built is what **Harshith asked for**, and that
 3. The change: `git diff origin/full-app..HEAD` (or the commit range you are given) in `/home/claude/the_fest`.
 
 ## Check, in this order
+0. **Plan followed** — if a plan exists in `docs/team/plans/`, check the work did what the plan said, no more and no less; flag any extra work or skipped step.
 1. **Matches Harshith's inputs** — does it do what he asked, in the way he chose? Does it break any standing rule
    (pushing small changes, touching `main` or his accounts, replacing his assumptions, live vs refresh choices…)?
    Anything built that he did not ask for and that adds risk?

@@ -1,6 +1,9 @@
 # How THE FEST gets built — the team
 
-Harshith asked (Oct 17, 2026) for every piece of work to go through four roles, in this order:
+Harshith asked (Oct 17, 2026) for every piece of work to go through these roles, in this order (updated the same day: a **Planner** goes first and the **Supervisor** also checks the plan was followed; his usage budget is limited, so keep rounds few and plans lean):
+
+`PLANNER (fest-planner) → plan in docs/team/plans/ → BUILDER → SUPERVISOR (+ plan check) → TESTER → fixes`
+
 
 ```
  Harshith's request

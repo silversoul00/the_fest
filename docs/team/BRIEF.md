@@ -44,6 +44,16 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   and the tables set up. Harshith said "Run it" for the table setup.
 - Hosting stays Vercel; there is no Vercel connection here, so Harshith sets Vercel settings himself from our checklist.
 
+## Scanner: one QR, different counters (Oct 17, 2026)
+- One QR per ticket. What a scan shows depends on **who is scanning**: the organizer assigns each volunteer a counter
+  (Gate / Lunch / Stay); a lunch volunteer only sees and uses lunch coupons, the hostel desk only sees stay.
+- The QR itself stays the same signed ID; lunch/stay are kept on the ticket in our database, not inside the QR.
+- **Lunch**: the organizer sets the rules beforehand (which days / how many).
+- **Stay**: check-in **and** check-out.
+- Lunch and stay can be **included with a ticket type and also sold as add-ons** (both).
+- No other counters for now (no kits/workshops/VIP). Day passes and re-entry not requested.
+- Efficiency: Harshith's weekly limit is tight — plans lean, few agent rounds, full team only for big features.
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.
