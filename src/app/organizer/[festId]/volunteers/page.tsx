@@ -29,7 +29,7 @@ export default async function Volunteers({ params }: { params: Promise<{ festId:
 
       <div className="card">
         <div className="h3 mb8">Add a volunteer</div>
-        <p className="xs muted mb16">They sign up (any role) with this email, then open <span className="mono">/scan</span> to scan tickets for your fest. Duty “Lunch counter” scans lunch only, “Stay desk” (or “Hostel…”) scans stay check-in/out only; anything else is the gate.</p>
+        <p className="xs muted mb16">They sign up (any role) with this email, then open <span className="mono">/scan</span> to scan tickets for your fest. Duty “Lunch counter” scans lunch only, “Stay desk” (or “Hostel…”) scans stay only — first scan checks in, next scan checks out; anything else is the gate.</p>
         <ActionForm action={addStaff} resetOnSuccess>
           <input type="hidden" name="festId" value={fest.id} />
           <div className="form-row">

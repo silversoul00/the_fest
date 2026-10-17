@@ -52,6 +52,8 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 - **Stay**: check-in **and** check-out.
 - Lunch and stay can be **included with a ticket type and also sold as add-ons** (both).
 - No other counters for now (no kits/workshops/VIP). Day passes and re-entry not requested.
+- Coordinator's choice (Oct 17, 2026), waiting for Harshith's yes: when an organizer refunds an entry ticket, its paid
+  lunch/stay add-ons are **refunded automatically** in the same refund (money returned once) — the student can't use them any more.
 - Efficiency: Harshith's weekly limit is tight — plans lean, few agent rounds, full team only for big features.
 
 ## Decided features (built)

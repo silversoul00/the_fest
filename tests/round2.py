@@ -493,7 +493,7 @@ async def section_schema(b):
         await adm.goto(BASE + '/admin/errors'); await adm.wait_for_load_state('networkidle')
         txt = (await adm.locator('main').inner_text()) if await adm.locator('main').count() else ''
         check('12 /admin/errors with app_errors missing: a plain "run Part 2a" message, not the crash page',
-              'Something went wrong' not in txt and 'SOMETHING WENT WRONG' not in txt and 'Errors' in txt, txt[:160])
+              'Something went wrong' not in txt and 'SOMETHING WENT WRONG' not in txt and 'Errors' in txt and 'Part 2a' in txt, txt[:160])
         await shoot(b, '/admin', 'system_setup_incomplete', await adm.context.cookies(), 'section[aria-label=System]')
         await shoot(b, '/admin/errors', 'errors_table_missing', await adm.context.cookies())
         await shoot(b, '/api/health', 'health_setup_incomplete')

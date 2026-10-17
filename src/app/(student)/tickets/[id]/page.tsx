@@ -65,7 +65,9 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
       where o.addon_for = ${t.id} and o.status = 'paid'`,
     sql<{ slot: string; created_at: Date }[]>`select slot, created_at from perk_redemptions where ticket_id = ${t.id}`,
     t.fest_status === 'live' && t.ends_on >= todayIST() ? getTicketTypes(t.fest_id, 'addon') : Promise.resolve([]),
-    sql<{ ticket_type_id: string }[]>`select ticket_type_id from orders where addon_for = ${t.id} and status in ('paid', 'pending')`,
+    // Pending checkouts only count while their hold lasts (15 min card, 30 min bank UPI, or a UTR was entered)
+    sql<{ ticket_type_id: string }[]>`select ticket_type_id from orders where addon_for = ${t.id} and (status = 'paid' or (status = 'pending' and
+      (utr is not null or created_at > now() - case when method = 'upi_direct' then interval '30 minutes' else interval '15 minutes' end)))`,
   ]);
   const lunchDays = [...new Set(perkRows.flatMap((r) => r.lunch_days))].sort();
   const hasStay = perkRows.some((r) => r.includes_stay);

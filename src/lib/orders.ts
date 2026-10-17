@@ -40,7 +40,11 @@ export async function createOrder(input: { userId: string; ticketTypeId: string;
       throw new OrderError('This fest does not accept direct UPI. Choose card/UPI checkout.');
     }
 
+    const released = await releaseExpiredHolds(tx, ticketTypeId);
+    const sold = tt.sold - released;
+
     // Add-ons (lunch / stay) attach to one ticket the buyer holds for this fest: one per ticket, no new ticket, no seat.
+    // Checked after expired holds are released, so an abandoned checkout doesn't block buying it again.
     let addonFor: string | null = null;
     if (tt.kind === 'addon') {
       if (!input.ticketId) throw new OrderError('Add-ons are bought from your ticket page.');
@@ -49,13 +53,13 @@ export async function createOrder(input: { userId: string; ticketTypeId: string;
         for update`;
       if (!t) throw new OrderError('Pick one of your valid tickets for this fest.');
       const [dup] = await tx`select 1 from orders where addon_for = ${t.id} and ticket_type_id = ${ticketTypeId} and status in ('paid', 'pending')`;
-      if (dup) throw new OrderError(`This ticket already has ${tt.name}.`);
+      if (dup) {
+        if (released) await tx`update ticket_types set sold = ${sold} where id = ${ticketTypeId}`;
+        throw new OrderError(`This ticket already has ${tt.name}.`);
+      }
       addonFor = t.id;
       qty = 1;
     }
-
-    const released = await releaseExpiredHolds(tx, ticketTypeId);
-    const sold = tt.sold - released;
 
     if (sold + qty > tt.quota) {
       if (released) await tx`update ticket_types set sold = ${sold} where id = ${ticketTypeId}`;
@@ -157,6 +161,15 @@ export async function fulfilOrder(orderId: string, payment?: { provider: Provide
     // Share-lock the fest so a cancellation can't slip in between this check and the tickets.
     const [f] = await tx<{ status: string }[]>`select status from fests where id = ${o.fest_id} for share`;
     if (f.status === 'cancelled') return needsRefund('Paid after the fest was cancelled — refund needed');
+
+    // Add-on: pay only once per ticket, and only while the ticket is still valid (a late payment after a re-buy,
+    // or a ticket cancelled/transferred while paying, goes on the refund list instead).
+    if (o.addon_for) {
+      const [t] = await tx<{ status: string }[]>`select status from tickets where id = ${o.addon_for}`;
+      if (!t || t.status === 'void') return needsRefund('Add-on paid for a cancelled ticket — refund needed');
+      const [dup] = await tx`select 1 from orders where addon_for = ${o.addon_for} and ticket_type_id = ${o.ticket_type_id} and status = 'paid' and id <> ${o.id}`;
+      if (dup) return needsRefund('Add-on already on this ticket — refund needed');
+    }
 
     if (o.status === 'failed') {
       // Hold expired before payment landed — re-reserve if seats remain, else it needs a refund

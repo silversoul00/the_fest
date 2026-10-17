@@ -163,7 +163,7 @@ export async function redeemPerk(opts: { festId: string; scannerId: string; coun
   if ((await claim('stay_in')).length) return { result: 'admitted', message: 'Stay: checked in', ...who };
   const inAt = await usedAt('stay_in');
   if (inAt && Date.now() - inAt.getTime() < STAY_OUT_AFTER_SECONDS * 1000) {
-    return { result: 'duplicate', message: `Stay: checked in just now (${time(inAt)})`, ...who };
+    return { result: 'duplicate', message: `Just checked in (${time(inAt)}) — scan again later to check out`, ...who };
   }
   if ((await claim('stay_out')).length) return { result: 'admitted', message: 'Stay: checked out', ...who };
   const outAt = await usedAt('stay_out');

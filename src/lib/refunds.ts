@@ -14,7 +14,7 @@ import { afterResponse, reportError } from './errors';
  * • Demo / free: nothing to send.
  * Checked-in (used) tickets can't be refunded.
  */
-export async function refundOrder(orderId: string, opts: { festId: string; tickets?: number; reason: string; releaseSeats?: boolean }) {
+export async function refundOrder(orderId: string, opts: { festId: string; tickets?: number; reason: string; releaseSeats?: boolean; withAddons?: boolean }): Promise<{ amount: number; k: number; provider: string; refundedAfter: number; paymentId: string | null; gatewayOk: boolean; addons: number }> {
   const res = await sql.begin(async (tx) => {
     const [o] = await tx<{ id: string; qty: number; amount_paise: number; refunded_paise: number; platform_fee_paise: number; gateway_fee_paise: number; provider: string; status: string; ticket_type_id: string; payment_ref: string | null; razorpay_payment_id: string | null; addon_for: string | null }[]>`
       select id, qty, amount_paise, refunded_paise, platform_fee_paise, gateway_fee_paise, provider, status, ticket_type_id, payment_ref, razorpay_payment_id, addon_for
@@ -47,7 +47,9 @@ export async function refundOrder(orderId: string, opts: { festId: string; ticke
         refund_note = ${opts.reason.slice(0, 200)}
       where id = ${orderId}`;
     if (opts.releaseSeats !== false) await tx`update ticket_types set sold = greatest(sold - ${k}, 0) where id = ${o.ticket_type_id}`;
-    return { amount, k, provider: o.provider, refundedAfter: o.refunded_paise + amount, paymentId: o.provider === 'razorpay' ? o.razorpay_payment_id : o.payment_ref };
+    // Paid lunch/stay add-ons on the tickets just cancelled can't be used any more — refunded right after (each once).
+    const addonIds = ids.length ? (await tx<{ id: string }[]>`select id from orders where addon_for in ${tx(ids)} and status = 'paid'`).map((r) => r.id) : [];
+    return { addonIds, amount, k, provider: o.provider, refundedAfter: o.refunded_paise + amount, paymentId: o.provider === 'razorpay' ? o.razorpay_payment_id : o.payment_ref };
   });
 
   // Money movement happens after the database is updated; failures are flagged for retry.
@@ -65,7 +67,20 @@ export async function refundOrder(orderId: string, opts: { festId: string; ticke
     }
   }
   if (res.amount > 0) await afterResponse('refund email', () => notifyRefund(orderId, res.amount, opts.reason));
-  return { ...res, gatewayOk };
+  let addons = 0;
+  if (opts.withAddons !== false) {
+    for (const id of res.addonIds) {
+      try {
+        const r = await refundOrder(id, { festId: opts.festId, reason: `${opts.reason} (ticket cancelled)`, releaseSeats: opts.releaseSeats });
+        addons++;
+        if (!r.gatewayOk) gatewayOk = false;
+      } catch (e) {
+        if (!(e instanceof OrderError)) await reportError(e, `add-on refund (order ${id})`);
+      }
+    }
+  }
+  const { addonIds: _ignored, ...rest } = res;
+  return { ...rest, gatewayOk, addons };
 }
 
 /** Cancel a whole fest: stop sales and refund every paid order's unused tickets. */
@@ -75,7 +90,8 @@ export async function cancelFest(festId: string, reason: string) {
   let refunded = 0, failed = 0, skipped = 0;
   for (const o of orders) {
     try {
-      const r = await refundOrder(o.id, { festId, reason: `Fest cancelled — ${reason}`, releaseSeats: false });
+      // Every paid order (add-ons included) is in this loop, so add-ons aren't refunded a second way.
+      const r = await refundOrder(o.id, { festId, reason: `Fest cancelled — ${reason}`, releaseSeats: false, withAddons: false });
       if (r.gatewayOk) refunded++; else failed++;
     } catch {
       skipped++; // e.g. every ticket already used

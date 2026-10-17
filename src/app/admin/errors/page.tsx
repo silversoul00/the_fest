@@ -8,9 +8,22 @@ export const metadata = { title: 'Errors' };
 export default async function AdminErrors() {
   // Every admin page checks for itself: layouts don't run on client-side navigation requests.
   await requireAdmin();
-  const rows = await sql<{ id: number; at: Date; where_: string | null; message: string | null; path: string | null; repeats: number }[]>`
-    select id, at, where_, message, path, repeats from app_errors order by at desc, id desc limit 100`;
-  const [{ last_day: day }] = await sql<{ last_day: number }[]>`select coalesce(sum(repeats), 0)::int last_day from app_errors where at > now() - interval '24 hours'`;
+  let rows: { id: number; at: Date; where_: string | null; message: string | null; path: string | null; repeats: number }[];
+  let day: number;
+  try {
+    rows = await sql<typeof rows>`
+      select id, at, where_, message, path, repeats from app_errors order by at desc, id desc limit 100`;
+    [{ last_day: day }] = await sql<{ last_day: number }[]>`select coalesce(sum(repeats), 0)::int last_day from app_errors where at > now() - interval '24 hours'`;
+  } catch (e) {
+    // Table (or its newer columns) not created yet in this database
+    if (!['42P01', '42703'].includes((e as { code?: string }).code ?? '')) throw e;
+    return (
+      <>
+        <h1 className="h2">Errors</h1>
+        <div className="alert error" role="alert">Database setup incomplete — run Part 2a of the launch checklist (docs/LAUNCH-CHECKLIST.md) in Supabase → SQL Editor. Until then errors can’t be listed here.</div>
+      </>
+    );
+  }
 
   return (
     <>

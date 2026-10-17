@@ -15,7 +15,7 @@ type FeedItem = Verdict & { at: number };
 const TITLE: Record<Counter, Record<Verdict['result'], string>> = {
   gate: { admitted: '✓ Admit', duplicate: '⚠ Already in', invalid: '✕ Invalid', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled' },
   lunch: { admitted: '✓ Lunch', duplicate: '⚠ Already had lunch', invalid: '✕ No lunch', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled' },
-  stay: { admitted: '✓ Stay', duplicate: '⚠ Stay done', invalid: '✕ No stay', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled' },
+  stay: { admitted: '✓ Stay', duplicate: '⚠ Already checked out', invalid: '✕ No stay', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled' },
 };
 const COUNTER_LABEL: Record<Counter, string> = { gate: 'Gate', lunch: 'Lunch counter', stay: 'Stay desk' };
 
@@ -202,7 +202,7 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
 
         {verdict && (
           <div className={`verdict ${verdict.result}`} role="status" aria-live="assertive" onClick={() => setVerdict(null)}>
-            <div className="big">{TITLE[counter][verdict.result]}</div>
+            <div className="big">{counter === 'stay' && verdict.result === 'duplicate' && verdict.message.startsWith('Just checked in') ? '⚠ Just checked in' : TITLE[counter][verdict.result]}</div>
             {verdict.holder && <div className="mt8" style={{ color: 'var(--white)', fontSize: 18 }}>{verdict.holder}</div>}
             <div className="small mt8">
               {verdict.type ? `${verdict.type} · ` : ''}{verdict.message}

@@ -366,9 +366,10 @@ export async function refundOrderAction(_: ActionState, fd: FormData): Promise<A
   try {
     const r = await refundOrder(s(fd, 'orderId'), { festId: fest.id, tickets: n, reason });
     refresh(fest.id);
-    if (r.provider === 'upi_direct') return { ok: true, message: `${r.k} ticket(s) cancelled. Send ${rupees(r.amount)} back to the student by UPI, then mark it sent.` };
-    if (!r.gatewayOk) return { ok: true, message: `${r.k} ticket(s) cancelled, but the gateway refund failed. THE FEST has been alerted to retry.` };
-    return { ok: true, message: `${r.k} ticket(s) cancelled${r.amount ? ` and ${rupees(r.amount)} refunded` : ''}.` };
+    const plus = r.addons ? ` Its lunch/stay add-on${r.addons > 1 ? 's were' : ' was'} refunded too.` : '';
+    if (r.provider === 'upi_direct') return { ok: true, message: `${r.k} ticket(s) cancelled.${plus} Send ${rupees(r.amount)} back to the student by UPI, then mark it sent.` };
+    if (!r.gatewayOk) return { ok: true, message: `${r.k} ticket(s) cancelled, but the gateway refund failed. THE FEST has been alerted to retry.${plus}` };
+    return { ok: true, message: `${r.k} ticket(s) cancelled${r.amount ? ` and ${rupees(r.amount)} refunded` : ''}.${plus}` };
   } catch (e) {
     if (e instanceof OrderError) return { error: e.message };
     throw e;
