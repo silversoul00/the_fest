@@ -50,4 +50,9 @@ python3 tests/errors.py
 # Production-mode checks start their own servers on :3001/:3002 (APP_ENV=production etc.)
 python3 tests/prod.py
 bash tests/ops.sh
+# Tester round 1 (2026-10-17): money safety with a fake Cashfree (:3003), schema-upgrade/backup encryption,
+# missing-table health, /setup/keys pairs, error bursts, keys-removed ticket page (:3004)
+python3 tests/money.py
+bash tests/schema_backup.sh
+python3 tests/prod_extra.py
 echo "✓ Release check passed"
