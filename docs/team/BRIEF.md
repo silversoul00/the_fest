@@ -38,6 +38,12 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 - Every feature is tested in a real browser before it ships (`bash tests/run-e2e.sh`).
 - Work order (Oct 17, 2026): **Researcher → Builder → Supervisor → Tester → fixes**, repeated until clean. See `docs/team/`.
 
+## Deployment (Oct 17, 2026)
+- Harshith: "build it for deployment … no longer just a prototype but a fully functional web app."
+- Old Supabase project couldn't be restored (paused > 400 days); a new free project **thefest** (Mumbai) was created with his OK
+  and the tables set up. Harshith said "Run it" for the table setup.
+- Hosting stays Vercel; there is no Vercel connection here, so Harshith sets Vercel settings himself from our checklist.
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.
