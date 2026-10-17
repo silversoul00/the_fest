@@ -1,0 +1,173 @@
+-- ═══════════════════════════════════════════════════════════════
+-- THE FEST — demo data for a PREVIEW database only (never production).
+-- Same story as scripts/seed.mjs, written as plain SQL so it can be pasted
+-- into the Supabase SQL editor. Every demo login uses the password: password123
+-- Runs only on an empty database.
+-- ═══════════════════════════════════════════════════════════════
+do $$
+declare
+  pw text := '$2b$10$Thz73S7Aesh.phEeuIumc.QH9bSblPLPwe.Lece0mToqwzc4xohcy';  -- bcrypt('password123')
+  colleges text[] := array['Demo Institute of Technology','Sample School of Design','Example College of Commerce','Placeholder University'];
+  firsts text[] := array['Aarav','Diya','Rohan','Ananya','Karthik','Meera','Vikram','Sneha','Arjun','Kavya','Rahul','Ishita','Nikhil','Pooja','Siddharth','Tanvi','Aditya','Nandini','Varun','Shreya'];
+  lasts text[] := array['Rao','Sharma','Iyer','Reddy','Nair','Gowda','Menon','Kulkarni','Hegde','Shetty','Patil','Bhat'];
+  org1 uuid; org2 uuid; stu uuid; vol uuid; adm uuid;
+  f_neon uuid; f_hack uuid; f_kalaa uuid; f_comm uuid; f_beats uuid; f_goal uuid;
+  s1 uuid; s2 uuid;
+  d0 date := (now() at time zone 'Asia/Kolkata')::date;
+begin
+  if exists (select 1 from fests) then raise exception 'Database already has fests — demo seed is only for an empty preview database'; end if;
+
+  insert into users (email, password_hash, name, role, college, email_verified_at) values ('organizer@thefest.in', pw, 'Riya Kapoor', 'organizer', colleges[1], now()) returning id into org1;
+  insert into users (email, password_hash, name, role, college, email_verified_at) values ('organizer2@thefest.in', pw, 'Dev Malhotra', 'organizer', colleges[2], now()) returning id into org2;
+  insert into users (email, password_hash, name, role, college, email_verified_at) values ('student@thefest.in', pw, 'Arjun Sharma', 'student', colleges[3], now()) returning id into stu;
+  insert into users (email, password_hash, name, role, email_verified_at) values ('sponsor@thefest.in', pw, 'Neha Brand Manager', 'sponsor', now());
+  insert into users (email, password_hash, name, role, college, email_verified_at) values ('volunteer@thefest.in', pw, 'Kiran Volunteer', 'student', colleges[1], now()) returning id into vol;
+  insert into users (email, password_hash, name, role, is_admin, email_verified_at) values ('admin@thefest.in', pw, 'THE FEST Admin', 'organizer', true, now()) returning id into adm;
+
+  -- 120 attendees
+  insert into users (email, password_hash, name, role, college, email_verified_at)
+  select 'attendee' || g || '@seed.thefest.in', pw,
+         firsts[1 + (g * 7) % 20] || ' ' || lasts[1 + (g * 5) % 12], 'student', colleges[1 + (g * 3) % 4], now()
+  from generate_series(1, 120) g;
+
+  -- Fests (dates relative to today, IST)
+  insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity, status, approved_at)
+  values ('neon-utsav', org1, 'Neon Utsav', colleges[1], 'Bengaluru', 'Main Grounds, Block A', 'cultural', d0 - 1, d0 + 1,
+          'Three nights of pro shows, dance battles and an indie music stage. The flagship sample fest on THE FEST — explore it to see how everything works.', '🎆', '#FFE034', 3000, 'live', now())
+  returning id into f_neon;
+  insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity, status, approved_at)
+  values ('hackverse', org1, 'Hackverse 36', colleges[1], 'Bengaluru', 'Innovation Centre', 'tech', d0 + 12, d0 + 13,
+          'A 36-hour student hackathon with workshops, mentor hours and ₹2L in prizes. Sample data.', '🚀', '#38BDF8', 600, 'live', now())
+  returning id into f_hack;
+  insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity, status, approved_at)
+  values ('kalaa-fest', org2, 'Kalaa', colleges[2], 'Mysuru', 'Open Air Theatre', 'cultural', d0 + 21, d0 + 23,
+          'Art, design and performance — street art walls, a fashion show and a folk-fusion night. Sample data.', '🎨', '#FF5C1A', 2000, 'live', now())
+  returning id into f_kalaa;
+  insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity, status, approved_at)
+  values ('commerce-carnival', org2, 'Commerce Carnival', colleges[3], 'Bengaluru', 'Auditorium & Quad', 'management', d0 + 34, d0 + 35,
+          'B-plan battles, a mock stock exchange and the best-manager hunt. Sample data.', '📈', '#00E5A0', 1200, 'live', now())
+  returning id into f_comm;
+  insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity, status, approved_at)
+  values ('campus-beats', org2, 'Campus Beats', colleges[4], 'Bengaluru', 'Amphitheatre', 'cultural', d0 + 45, d0 + 46,
+          'Battle of the bands and a DJ night. Waiting for THE FEST approval — sample data.', '🎤', '#B794F6', 1500, 'review', null)
+  returning id into f_beats;
+  insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity, status, approved_at)
+  values ('goal-rush', org1, 'Goal Rush', colleges[4], 'Bengaluru', 'Sports Complex', 'sports', d0 - 40, d0 - 38,
+          'Inter-college football and futsal. This one already happened — sample data.', '⚽', '#FF2D55', 1000, 'ended', now())
+  returning id into f_goal;
+
+  insert into ticket_types (fest_id, name, description, price_paise, quota, sort) values
+    (f_neon, 'Day Pass', 'Entry for one day, all open events', 29900, 1200, 0),
+    (f_neon, '3-Day Pass', 'All three days + pro night standing', 69900, 900, 1),
+    (f_neon, 'VIP Pro Night', 'Front pit for the headline act', 149900, 150, 2),
+    (f_hack, 'Hacker (team member)', 'One seat in a team of up to 4', 0, 400, 0),
+    (f_hack, 'Workshop Pass', 'All workshops, no hacking', 19900, 200, 1),
+    (f_kalaa, 'General', 'All days, all stages', 39900, 1500, 0),
+    (f_kalaa, 'Workshop Bundle', 'General + 3 art workshops', 79900, 120, 1),
+    (f_comm, 'Delegate', 'All events + lunch', 49900, 800, 0),
+    (f_beats, 'Entry', 'Both days', 19900, 1000, 0),
+    (f_goal, 'Spectator', 'All matches', 9900, 900, 0);
+
+  -- Sales: one order per (attendee, fest), spread over past days. Fee ₹15 per paid ticket.
+  create temp table plan (n int, buyer uuid, fest uuid, sort int, qty int, days_ago numeric) on commit drop;
+  insert into plan
+  select n, u.id, f_neon, case when n % 7 = 0 then 2 when n % 3 = 0 then 1 else 0 end, case when n % 9 = 0 then 2 else 1 end, (n * 37 % 21) + (n * 13 % 20) / 24.0
+  from (select id, row_number() over (order by email) - 1 as n from users where email like 'attendee%') u;
+  insert into plan select n, buyer, f_hack, n % 2, 1, (n * 11 % 10) + 0.3 from plan where fest = f_neon and n < 45;
+  insert into plan select n, buyer, f_kalaa, case when n % 10 < 8 then 0 else 1 end, 1, (n * 5 % 14) + 0.5 from plan where fest = f_neon and n between 40 and 94;
+  insert into plan select n, buyer, f_comm, 0, 1, (n * 3 % 7) + 0.2 from plan where fest = f_neon and n between 60 and 89;
+  insert into plan select n, buyer, f_goal, 0, 1, 45 + (n % 10) from plan where fest = f_neon and n < 70;
+  insert into plan values (900, stu, f_neon, 1, 1, 3), (901, stu, f_hack, 0, 1, 1);
+
+  insert into orders (user_id, fest_id, ticket_type_id, qty, amount_paise, platform_fee_paise, status, provider, created_at, paid_at)
+  select p.buyer, p.fest, tt.id, p.qty,
+         tt.price_paise * p.qty + case when tt.price_paise > 0 then 1500 * p.qty else 0 end,
+         case when tt.price_paise > 0 then 1500 * p.qty else 0 end,
+         'paid', case when tt.price_paise > 0 then 'demo' else 'free' end,
+         now() - (p.days_ago || ' days')::interval, now() - (p.days_ago || ' days')::interval
+  from plan p join ticket_types tt on tt.fest_id = p.fest and tt.sort = p.sort;
+
+  insert into tickets (code, order_id, user_id, fest_id, ticket_type_id, holder_name, issued_at)
+  select 'TF-' || upper(substr(md5(o.id::text || k), 1, 4)) || '-' || upper(substr(md5(o.id::text || k), 5, 4)),
+         o.id, o.user_id, o.fest_id, o.ticket_type_id,
+         case when o.qty > 1 then u.name || ' (' || k || '/' || o.qty || ')' else u.name end, o.paid_at
+  from orders o join users u on u.id = o.user_id cross join lateral generate_series(1, o.qty) k;
+
+  update ticket_types tt set sold = (select count(*) from tickets t where t.ticket_type_id = tt.id);
+
+  -- Gate team
+  insert into fest_staff (fest_id, email, name, duty, can_scan, checked_in_at) values
+    (f_neon, 'volunteer@thefest.in', 'Kiran Volunteer', 'Gate 1', true, now() - interval '5 hours'),
+    (f_neon, 'organizer@thefest.in', 'Riya Kapoor', 'Gate 1', true, now() - interval '5 hours'),
+    (f_neon, 'gate2@seed.thefest.in', 'Manoj Gate', 'Gate 2', true, now() - interval '4 hours'),
+    (f_neon, 'gate3@seed.thefest.in', 'Priya Gate', 'Gate 3', true, now() - interval '4 hours'),
+    (f_neon, 'desk@seed.thefest.in', 'Lakshmi Desk', 'Registration desk', false, null),
+    (f_neon, 'stage@seed.thefest.in', 'Rahul Stage', 'Main stage', false, null),
+    (f_hack, 'volunteer@thefest.in', 'Kiran Volunteer', 'Gate 1', true, null);
+
+  -- Check-ins: ~62% of Neon Utsav tickets today 9 AM–6 PM IST; most Goal Rush tickets
+  with c as (
+    select t.id, row_number() over (order by t.code) as r, count(*) over () as total
+    from tickets t where t.fest_id = f_neon and t.user_id <> stu
+  ), chosen as (
+    select id, r, (d0::timestamp + make_interval(hours => 9 + (r * 7 % 9)::int, mins => (r * 17 % 60)::int)) at time zone 'Asia/Kolkata' as at_
+    from c where r <= total * 0.62
+  ), upd as (
+    update tickets t set status = 'used', checked_in_at = ch.at_, checked_in_by = vol, gate = 'Gate ' || (1 + ch.r % 3)
+    from chosen ch where t.id = ch.id returning t.id, t.fest_id, t.gate, t.checked_in_at
+  )
+  insert into scans (fest_id, ticket_id, scanned_by, gate, result, created_at) select fest_id, id, vol, gate, 'admitted', checked_in_at from upd;
+
+  with c as (
+    select t.id, row_number() over (order by t.code) as r from tickets t where t.fest_id = f_goal
+  ), upd as (
+    update tickets t set status = 'used', checked_in_by = vol, gate = 'Gate ' || (1 + c.r % 3),
+      checked_in_at = ((d0 - 40)::timestamp + make_interval(hours => 10 + (c.r * 5 % 6)::int, mins => (c.r * 13 % 60)::int)) at time zone 'Asia/Kolkata'
+    from c where t.id = c.id and c.r <= 64 returning t.id, t.fest_id, t.gate, t.checked_in_at
+  )
+  insert into scans (fest_id, ticket_id, scanned_by, gate, result, created_at) select fest_id, id, vol, gate, 'admitted', checked_in_at from upd;
+
+  insert into scans (fest_id, ticket_id, scanned_by, gate, result, detail, created_at)
+  select f_neon, t.id, vol, 'Gate ' || (1 + r % 3), 'duplicate', 'Already used', (d0::timestamp + make_interval(hours => 12 + r::int, mins => 5)) at time zone 'Asia/Kolkata'
+  from (select id, row_number() over (order by checked_in_at) - 1 as r from tickets where fest_id = f_neon and status = 'used' limit 6) t;
+  insert into scans (fest_id, scanned_by, gate, result, detail, created_at)
+  select f_neon, vol, 'Gate ' || g, 'invalid', 'Signature check failed', (d0::timestamp + make_interval(hours => 12 + g, mins => 20)) at time zone 'Asia/Kolkata'
+  from generate_series(1, 3) g;
+
+  -- Schedule
+  insert into schedule_events (fest_id, title, venue, category, starts_at, ends_at)
+  select f_neon, title, venue, cat,
+         ((d0 + d)::timestamp + make_interval(hours => s)) at time zone 'Asia/Kolkata',
+         ((d0 + d)::timestamp + make_interval(hours => e)) at time zone 'Asia/Kolkata'
+  from (values (-1,10,12,'Inauguration & Lamp Lighting','Main Stage','ceremony'), (-1,14,17,'Battle of Bands — Prelims','Indie Stage','music'),
+               (-1,19,22,'Bollywood Night','Main Grounds','pro-show'), (0,10,13,'Street Dance Battle','Quad','dance'),
+               (0,11,13,'Treasure Hunt','Campus-wide','fun'), (0,14,16,'Open Mic','Indie Stage','music'),
+               (0,16,18,'Fashion Walk','Main Stage','fashion'), (0,19,23,'EDM Pro Night','Main Grounds','pro-show'),
+               (1,10,12,'Quiz — Finals','Auditorium','quiz'), (1,13,16,'Battle of Bands — Finals','Indie Stage','music'),
+               (1,19,22,'Headliner Concert','Main Grounds','pro-show')) v(d, s, e, title, venue, cat);
+  insert into schedule_events (fest_id, title, venue, starts_at, ends_at)
+  select f_hack, title, venue,
+         ((d0 + d)::timestamp + make_interval(hours => s)) at time zone 'Asia/Kolkata',
+         ((d0 + d)::timestamp + make_interval(hours => e)) at time zone 'Asia/Kolkata'
+  from (values (12,9,10,'Check-in & Breakfast','Lobby'), (12,10,11,'Opening Keynote','Hall A'), (12,11,23,'Hacking — Round 1','Labs'),
+               (13,10,13,'Final Demos','Hall A'), (13,15,16,'Prize Ceremony','Hall A')) v(d, s, e, title, venue);
+
+  -- Announcements
+  insert into announcements (fest_id, title, body, urgent, created_at) values
+    (f_neon, 'Gate 2 is crowded', 'Please use Gate 3 near the parking lot — shorter queue.', true, (d0::timestamp + interval '17 hours 40 minutes') at time zone 'Asia/Kolkata'),
+    (f_neon, 'EDM Pro Night starts 7 PM', 'Gates to the Main Grounds open at 6:15. Carry your QR pass.', false, (d0::timestamp + interval '12 hours') at time zone 'Asia/Kolkata'),
+    (f_neon, 'Welcome to Neon Utsav!', 'Food court is at Block C. Water stations at every gate.', false, ((d0 - 1)::timestamp + interval '9 hours') at time zone 'Asia/Kolkata'),
+    (f_hack, 'Team registrations close soon', 'Lock your team of up to 4 before the event week.', false, ((d0 - 1)::timestamp + interval '18 hours') at time zone 'Asia/Kolkata');
+
+  -- Sponsors (fictional brands); sponsor@thefest.in sees Volt Energy
+  insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code) values (f_neon, 'sponsor@thefest.in', 'Volt Energy', 'Title', 50000000, encode(gen_random_bytes(9), 'hex')) returning id into s1;
+  insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code) values (f_hack, 'sponsor@thefest.in', 'Volt Energy', 'Powered by', 15000000, encode(gen_random_bytes(9), 'hex')) returning id into s2;
+  insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code) values
+    (f_neon, 'brand@seed.thefest.in', 'Chai Point Express', 'Associate', 10000000, encode(gen_random_bytes(9), 'hex')),
+    (f_neon, 'brand2@seed.thefest.in', 'PixelPhone', 'Partner', 7500000, encode(gen_random_bytes(9), 'hex'));
+  insert into sponsor_visits (sponsor_id, user_id, created_at)
+  select s1, id, (d0::timestamp + make_interval(hours => 10 + (r * 7 % 9)::int, mins => (r * 23 % 60)::int)) at time zone 'Asia/Kolkata'
+  from (select id, row_number() over (order by email) as r from users where email like 'attendee%') u where r <= 74;
+  insert into sponsor_visits (sponsor_id, user_id)
+  select s2, id from (select id, row_number() over (order by email) as r from users where email like 'attendee%') u where r <= 12;
+end $$;
