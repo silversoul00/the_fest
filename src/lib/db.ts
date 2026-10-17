@@ -1,5 +1,6 @@
 import 'server-only';
 import postgres from 'postgres';
+import { isLocalDatabase } from './env';
 
 // One pool per server instance. In dev, Next.js hot-reloads modules,
 // so the pool is cached on globalThis to avoid leaking connections.
@@ -9,7 +10,7 @@ function get(): postgres.Sql {
   if (g.__tfSql) return g.__tfSql;
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not set. See .env.example.');
-  const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
+  const local = isLocalDatabase(url); // localhost / unix socket: no TLS; anything else (Supabase) requires it
   g.__tfSql = postgres(url, {
     ssl: local ? false : 'require', // Supabase requires TLS
     prepare: false, // required for Supabase's transaction pooler (port 6543)

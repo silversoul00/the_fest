@@ -27,7 +27,7 @@ Built with **Next.js 15** · **PostgreSQL (Supabase)** · **Razorpay** · ECDSA-
 
 Follow **[docs/LAUNCH-CHECKLIST.md](docs/LAUNCH-CHECKLIST.md)** — a step-by-step guide (works on a phone) for Vercel + Supabase:
 database connection (Supabase **transaction pooler**, port 6543), ticket keys (made in the browser at `/setup/keys`),
-email, every environment variable, Preview first, becoming admin, going live, rollback, uptime alerts and encrypted backups.
+email, every environment variable, Preview first, becoming admin, going live, rollback, uptime alerts and encrypted backups (which only run once the workflow file is on the default branch — see Part 10).
 
 - `vercel.json` builds this branch as Next.js in Mumbai (`bom1`); the project's Framework setting doesn't need changing.
 - `/api/health` returns 503 and lists the **names** of missing/wrong settings; 200 `{"status":"ok"}` when all is well.

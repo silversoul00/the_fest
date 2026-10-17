@@ -51,13 +51,16 @@ async def main():
 
     # ── Errors log + alert (criterion 17) ──
     q('delete from app_alert_state')
-    before = int(q('select count(*) from app_errors'))
+    before = int(q('select coalesce(sum(repeats), 0) from app_errors'))
+    rows_before = int(q('select count(*) from app_errors'))
     alerts_before = int(q("select count(*) from email_outbox where to_email='admin@thefest.in' and subject like '%new error%'"))
     s1, _, _ = get('/api/test-error'); s2, _, _ = get('/api/test-error')
     check('test error route returns 500', s1 == 500 and s2 == 500, (s1, s2))
     await asyncio.sleep(1.5)
-    after = int(q('select count(*) from app_errors'))
-    check('both errors stored in app_errors', after - before >= 2, (before, after))
+    after = int(q('select coalesce(sum(repeats), 0) from app_errors'))
+    check('both errors recorded in app_errors (counted in repeats)', after - before >= 2, (before, after))
+    # Same error twice within 5 minutes → one row, not two (decision 6: a broken page can't flood the log)
+    check('the same error twice is kept as ONE row', int(q('select count(*) from app_errors')) - rows_before <= 1, (rows_before, q('select count(*) from app_errors')))
     check('error row says where it happened', q("select count(*) from app_errors where where_ like '%test-error%' and message like '%Test error from the release check%'") != '0')
     alerts = int(q("select count(*) from email_outbox where to_email='admin@thefest.in' and subject like '%new error%'")) - alerts_before
     check('two errors within 15 minutes → exactly one alert email', alerts == 1, alerts)

@@ -344,22 +344,26 @@ alter table orders add column if not exists refund_retry_at timestamptz;
 alter table orders add column if not exists refund_failed_paise int not null default 0;  -- gateway refund amount awaiting retry
 
 -- v2.2 (Oct 2026): production readiness
--- Failed-login counter shared by every server instance (Vercel runs many). Key = normalized email.
+-- Failed-login counter shared by every server instance (Vercel runs many).
+-- Keys: 'ip:<email>|<ip>' (tight limit) and 'e:<email>' (looser limit). Rows idle for a day are pruned.
 create table if not exists login_attempts (
   key           text primary key,
   fails         int not null default 0,
   window_start  timestamptz not null default now()
 );
 
--- Built-in error log, shown on /admin/errors
+-- Built-in error log, shown on /admin/errors. The same error again within 5 minutes bumps `repeats` and `at`
+-- (last seen) instead of adding a row; rows older than 30 days, or beyond the newest 5,000, are pruned.
 create table if not exists app_errors (
   id       bigserial primary key,
   at       timestamptz not null default now(),
   where_   text,
   message  text,
   digest   text,
-  path     text
+  path     text,
+  repeats  int not null default 1
 );
+alter table app_errors add column if not exists repeats int not null default 1;
 create index if not exists app_errors_at_idx on app_errors(at desc);
 
 -- One row: when the last "new errors" email went to the admins (at most one per 15 minutes)

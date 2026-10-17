@@ -2,7 +2,7 @@ import { getUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { body, fail, isUuid, json, sameOrigin } from '@/lib/http';
 import { cancelOrder, createOrder, fulfilOrder, OrderError } from '@/lib/orders';
-import { activeGateway, createRazorpayOrder } from '@/lib/payments';
+import { activeGateway, createRazorpayOrder, razorpayKeyId } from '@/lib/payments';
 import { cashfreeMode, createCashfreeOrder } from '@/lib/cashfree';
 import { upiLink } from '@/lib/upi-parse';
 import { notifyOrderPaid } from '@/lib/mail';
@@ -92,7 +92,7 @@ export async function POST(req: Request) {
       }
       const rzp = await createRazorpayOrder(o.amount, o.orderId.slice(0, 40), { order_id: o.orderId, user_id: user.id });
       await sql`update orders set provider = 'razorpay', razorpay_order_id = ${rzp.id} where id = ${o.orderId}`;
-      return json({ mode: 'razorpay', orderId: o.orderId, rzpOrderId: rzp.id, amount: o.amount, keyId: process.env.RAZORPAY_KEY_ID });
+      return json({ mode: 'razorpay', orderId: o.orderId, rzpOrderId: rzp.id, amount: o.amount, keyId: razorpayKeyId() });
     } catch (e) {
       await reportError(e, `${gw} order create`);
       await cancelOrder(o.orderId, user.id);

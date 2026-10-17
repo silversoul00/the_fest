@@ -1,5 +1,5 @@
 import 'server-only';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createHash, randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
@@ -109,27 +109,73 @@ export function normalizeEmail(e: string) {
 }
 
 /*
- * Brute-force protection: max 10 failed logins per email per 15 minutes.
- * Kept in the database (login_attempts), so it holds across every server instance and restart —
- * on Vercel each request may hit a different instance. App login and scanner login share the counter.
+ * Brute-force protection, kept in the database (login_attempts) so it holds across every server
+ * instance and restart — on Vercel each request may hit a different instance.
+ *  • Per email + network (IP): 10 failed logins per 15 minutes. A stranger guessing a volunteer's
+ *    password from their own phone locks only themselves out, not the volunteer at the gate.
+ *  • Per email, from anywhere: 50 failed logins per 15 minutes (looser cap against spread-out guessing).
+ * App login and scanner login share the counters.
+ * If the table is missing or the database hiccups, the throttle FAILS OPEN (people can still log in)
+ * and the problem is logged to /admin/errors — /api/health also reports the missing table.
  */
-const MAX_FAILS = 10;
+export const MAX_FAILS_PER_IP = 10;
+export const MAX_FAILS_PER_EMAIL = 50;
+
+/** The visitor's IP: first address in x-forwarded-for (Vercel sets this), else x-real-ip. */
+export async function clientIp(): Promise<string> {
+  try {
+    const h = await headers();
+    const first = (h.get('x-forwarded-for') ?? '').split(',')[0].trim();
+    return (first || (h.get('x-real-ip') ?? '').trim() || 'unknown').slice(0, 64).toLowerCase();
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function throttleKeys(email: string) {
+  const e = normalizeEmail(email);
+  return { ipKey: `ip:${e}|${await clientIp()}`, emailKey: `e:${e}` };
+}
+
+async function logThrottleError(err: unknown, where: string) {
+  const { reportError } = await import('./errors');
+  await reportError(err, where);
+}
 
 export async function loginThrottled(email: string): Promise<boolean> {
-  const [r] = await sql<{ blocked: boolean }[]>`
-    select fails >= ${MAX_FAILS} and window_start > now() - interval '15 minutes' as blocked
-    from login_attempts where key = ${normalizeEmail(email)}`;
-  return !!r?.blocked;
+  try {
+    const { ipKey, emailKey } = await throttleKeys(email);
+    const [r] = await sql<{ blocked: boolean }[]>`
+      select coalesce(bool_or(window_start > now() - interval '15 minutes' and
+               fails >= case when key = ${ipKey} then ${MAX_FAILS_PER_IP}::int else ${MAX_FAILS_PER_EMAIL}::int end), false) as blocked
+      from login_attempts where key in (${ipKey}, ${emailKey})`;
+    return !!r?.blocked;
+  } catch (err) {
+    await logThrottleError(err, 'login throttle (failing open)');
+    return false;
+  }
 }
 
 export async function noteFailedLogin(email: string) {
-  await sql`
-    insert into login_attempts (key, fails, window_start) values (${normalizeEmail(email)}, 1, now())
-    on conflict (key) do update set
-      fails = case when login_attempts.window_start < now() - interval '15 minutes' then 1 else login_attempts.fails + 1 end,
-      window_start = case when login_attempts.window_start < now() - interval '15 minutes' then now() else login_attempts.window_start end`;
+  try {
+    const { ipKey, emailKey } = await throttleKeys(email);
+    await sql`
+      insert into login_attempts (key, fails, window_start) values (${ipKey}, 1, now()), (${emailKey}, 1, now())
+      on conflict (key) do update set
+        fails = case when login_attempts.window_start < now() - interval '15 minutes' then 1 else login_attempts.fails + 1 end,
+        window_start = case when login_attempts.window_start < now() - interval '15 minutes' then now() else login_attempts.window_start end`;
+    // Made-up emails each leave a row; now and then clear out ones idle for a day.
+    if (Math.random() < 0.02) await sql`delete from login_attempts where window_start < now() - interval '1 day'`;
+  } catch (err) {
+    await logThrottleError(err, 'login throttle (failing open)');
+  }
 }
 
 export async function clearFailedLogins(email: string) {
-  await sql`delete from login_attempts where key = ${normalizeEmail(email)}`;
+  try {
+    const { ipKey, emailKey } = await throttleKeys(email);
+    await sql`delete from login_attempts where key in (${ipKey}, ${emailKey})`;
+  } catch (err) {
+    await logThrottleError(err, 'login throttle (failing open)');
+  }
 }

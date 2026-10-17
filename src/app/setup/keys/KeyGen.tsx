@@ -22,7 +22,11 @@ function CopyBox({ name, value }: { name: string; value: string }) {
   );
 }
 
-export function KeyGen() {
+/**
+ * `other`: keys are already set on this site. Offer a fresh pair for ANOTHER environment (e.g. Production)
+ * without showing or touching the current keys — the server never sends them here, and nothing is sent back.
+ */
+export function KeyGen({ other = false }: { other?: boolean }) {
   const [keys, setKeys] = useState<{ priv: string; pub: string } | null>(null);
   const [err, setErr] = useState('');
 
@@ -39,17 +43,21 @@ export function KeyGen() {
 
   return (
     <div className="stack g16">
-      <p className="small soft">Every ticket QR is signed with these keys, so nobody can fake a ticket. They are made right here in your browser — nothing is sent to the server.</p>
+      {other ? (
+        <p className="small soft">This makes a brand-new pair for a <strong>different</strong> environment — for example Production, while this site is a Preview. It doesn’t show or change the keys this site uses. Made right here in your browser; nothing is sent to the server.</p>
+      ) : (
+        <p className="small soft">Every ticket QR is signed with these keys, so nobody can fake a ticket. They are made right here in your browser — nothing is sent to the server.</p>
+      )}
       <ol className="small soft stack g8" style={{ paddingLeft: 18 }}>
-        <li>Tap <strong>Make keys</strong>.</li>
-        <li>In Vercel → your project → Settings → Environment Variables, add <span className="mono">TICKET_PRIVATE_KEY</span> and <span className="mono">TICKET_PUBLIC_KEY</span> with these values.</li>
-        <li>Use a different pair for Preview and for Production.</li>
-        <li>Redeploy. This page will then say “Keys are already set”.</li>
+        <li>Tap <strong>{other ? 'Make a pair for another environment' : 'Make keys'}</strong>.</li>
+        <li>In Vercel → your project → Settings → Environment Variables, add <span className="mono">TICKET_PRIVATE_KEY</span> and <span className="mono">TICKET_PUBLIC_KEY</span> with these values{other ? ', ticking only the environment this pair is for (e.g. Production)' : ''}.</li>
+        <li>Preview and Production each need their own pair. Make both now, one after the other: copy this pair into one environment, then tap <strong>Make a different pair</strong> for the other.</li>
+        <li>{other ? 'Redeploy that environment.' : 'Redeploy. This page will then say “Keys are already set”.'}</li>
       </ol>
-      <div className="alert error">Never change these after tickets are sold — every ticket already issued would stop scanning. Keep the private key secret.</div>
+      <div className="alert error">Never change a site’s keys after tickets are sold — every ticket already issued would stop scanning. Keep the private key secret.</div>
       {err && <div className="alert error" role="alert">{err}</div>}
       {!keys ? (
-        <button type="button" className="btn block" onClick={make}>Make keys</button>
+        <button type="button" className="btn block" onClick={make}>{other ? 'Make a pair for another environment' : 'Make keys'}</button>
       ) : (
         <>
           <CopyBox name="TICKET_PRIVATE_KEY" value={keys.priv} />

@@ -85,7 +85,8 @@ img, svg { display: block; max-width: 100%; }
   .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .md-row { flex-direction: row; }
 }
-.page { padding: 20px 0 calc(var(--nav-h) + 32px); }
+/* Top/bottom only: on `wrap page` the side padding (the gutter) must come from .wrap. */
+.page { padding-top: 20px; padding-bottom: calc(var(--nav-h) + 32px); }
 .hide { display: none !important; }
 @media (max-width: 859px) { .hide-sm { display: none !important; } }
 @media (min-width: 860px) { .hide-md { display: none !important; } }

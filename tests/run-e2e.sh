@@ -55,4 +55,7 @@ bash tests/ops.sh
 python3 tests/money.py
 bash tests/schema_backup.sh
 python3 tests/prod_extra.py
+# Fix round 1 (2026-10-17): fail-safe production detection, database setup check, per-network login throttle,
+# error-log de-duplication/pruning, /setup/keys for another environment, 390px margins, safe .env.example (:3005)
+python3 tests/fixes1.py
 echo "✓ Release check passed"

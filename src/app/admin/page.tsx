@@ -9,16 +9,21 @@ import { approveFest, sendBackFest } from './actions';
 import { appEnv, configProblems, configWarnings } from '@/lib/env';
 import { gatewayLabel } from '@/lib/payments';
 import { checkTicketKeys } from '@/lib/ticket-crypto';
+import { missingSchema, schemaProblem } from '@/lib/schema-check';
 
 /** Admin-only: how the app is set up right now. Names of settings only, never their values. */
 async function SystemCard() {
   const problems = configProblems();
   const warnings = configWarnings();
   const keys = checkTicketKeys();
-  const [{ errs }] = await sql<{ errs: number }[]>`select count(*)::int errs from app_errors where at > now() - interval '24 hours'`;
+  const missing = await missingSchema();
+  // A database that hasn't had the latest SQL run may not have app_errors yet — don't break the admin page over it.
+  const errs = missing.some((m) => m.startsWith('app_errors')) ? 0 : (await sql<{ errs: number }[]>`
+    select coalesce(sum(repeats), 0)::int errs from app_errors where at > now() - interval '24 hours'`)[0].errs;
   const gw = gatewayLabel();
+  const toFix = problems.length + (missing.length ? 1 : 0);
   const rows: [string, string, boolean][] = [
-    ['Database', 'up', true],
+    ['Database', missing.length ? 'setup incomplete' : 'up', !missing.length],
     ['Card/UPI gateway', gw, gw.endsWith('live') || (appEnv() !== 'production' && gw !== 'none')],
     ['Email', process.env.RESEND_API_KEY ? 'resend' : 'not configured (kept in outbox)', !!process.env.RESEND_API_KEY],
     ['Ticket signing keys', keys === 'ok' ? 'OK' : keys, keys === 'ok'],
@@ -28,12 +33,13 @@ async function SystemCard() {
   return (
     <section className="card stack g8" aria-label="System">
       <div className="row between"><h2 className="h3">System</h2>
-        <span className={`badge ${problems.length ? 'red' : 'green'}`}>{problems.length ? `${problems.length} to fix` : 'all good'}</span></div>
+        <span className={`badge ${toFix ? 'red' : 'green'}`}>{toFix ? `${toFix} to fix` : 'all good'}</span></div>
       <div className="stack g4 small">
         {rows.map(([k, v, ok]) => (
           <div key={k} className="row between g8"><span className="soft">{k}</span><span className={`mono ${ok ? 'c-green' : 'c-orange'}`} style={{ textAlign: 'right' }}>{v}</span></div>
         ))}
       </div>
+      {missing.length > 0 && <div className="alert error" style={{ wordBreak: 'break-word' }}>{schemaProblem(missing)}. Run the database update SQL (Launch checklist, Part 2a) in Supabase → SQL Editor.</div>}
       {problems.length > 0 && <div className="alert error" style={{ wordBreak: 'break-word' }}>Fix in Vercel → Settings → Environment Variables, then redeploy: {problems.join(', ')}</div>}
       {warnings.length > 0 && <div className="alert info" style={{ wordBreak: 'break-word' }}>Heads-up: {warnings.join(', ')}{warnings.includes('NO_LIVE_GATEWAY') ? ' — card/UPI checkout is off; bank UPI and free tickets still work.' : ''}</div>}
       {errs > 0 && <Link className="accent small" href="/admin/errors">See errors →</Link>}

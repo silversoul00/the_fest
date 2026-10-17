@@ -58,3 +58,12 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 3. Fill business details on the policy pages; lawyer/CA review.
 4. Should co-organizers be allowed to refund? (Currently owner only.)
 5. Next analytics piece: sponsor analytics, his own business dashboard, or visitor tracking?
+6. Backups (Oct 17, 2026): GitHub only runs the backup job from the default branch (`main`). Options: (a) add just
+   `.github/workflows/db-backup.yml` to `main`, (b) make `full-app` the default branch, (c) Supabase Pro (daily backups).
+   Until he picks, there are **no backups** of production.
+7. Preview database (Oct 17, 2026): may we create a second free Supabase project (e.g. `thefest-preview`) so Preview test
+   payments never touch the real database? (Not created; ask first.)
+8. Coordinator's choices made for him on Oct 17, 2026, waiting for his yes: card checkout OFF on thefest.in until Cashfree
+   live keys exist (bank UPI and free tickets still work); functions run in Mumbai (bom1); login protection kept in the
+   database, per email + network (10 tries / 15 min) with a looser per-email cap (50 / 15 min); production is assumed
+   whenever a production build runs on a non-local database (fails safe); error log keeps ~30 days / 5,000 rows.

@@ -8,14 +8,14 @@ export const metadata = { title: 'Errors' };
 export default async function AdminErrors() {
   // Every admin page checks for itself: layouts don't run on client-side navigation requests.
   await requireAdmin();
-  const rows = await sql<{ id: number; at: Date; where_: string | null; message: string | null; path: string | null }[]>`
-    select id, at, where_, message, path from app_errors order by at desc, id desc limit 100`;
-  const [{ last_day: day }] = await sql<{ last_day: number }[]>`select count(*)::int last_day from app_errors where at > now() - interval '24 hours'`;
+  const rows = await sql<{ id: number; at: Date; where_: string | null; message: string | null; path: string | null; repeats: number }[]>`
+    select id, at, where_, message, path, repeats from app_errors order by at desc, id desc limit 100`;
+  const [{ last_day: day }] = await sql<{ last_day: number }[]>`select coalesce(sum(repeats), 0)::int last_day from app_errors where at > now() - interval '24 hours'`;
 
   return (
     <>
       <h1 className="h2">Errors</h1>
-      <p className="small soft">Things that went wrong on the server, newest first (last 100). {day} in the past 24 hours. You get an email at most once every 15 minutes when new ones appear.</p>
+      <p className="small soft">Things that went wrong on the server, newest first (last 100). {day} in the past 24 hours. The same error again within a few minutes is counted on one line. You get an email at most once every 15 minutes when new ones appear. Errors older than 30 days are cleared automatically.</p>
       {rows.length === 0 ? <Empty icon="✅" title="No errors" /> : (
         <div className="list">
           {rows.map((e) => {
@@ -24,7 +24,7 @@ export default async function AdminErrors() {
               <div key={e.id} className="li" style={{ display: 'block', minWidth: 0 }}>
                 <div className="row between g8 wrap-row">
                   <strong className="small" style={{ wordBreak: 'break-word' }}>{e.where_ ?? 'unknown'}</strong>
-                  <span className="xs muted" title={new Date(e.at).toISOString()}>{ago(e.at)}</span>
+                  <span className="xs muted" title={new Date(e.at).toISOString()}>{e.repeats > 1 ? `${e.repeats} times, last ` : ''}{ago(e.at)}</span>
                 </div>
                 {e.path && <div className="xs muted mono" style={{ wordBreak: 'break-all' }}>{e.path}</div>}
                 <div className="small c-orange" style={{ wordBreak: 'break-word', marginTop: 4 }}>{firstLine}</div>

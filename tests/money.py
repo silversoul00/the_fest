@@ -187,13 +187,23 @@ async def main():
                   not oid or order(oid).endswith(' 0'), (r['status'], r['body'].get('env'), oid and order(oid), [c['host'] for c in cf_state()['calls']]))
         finally:
             S.stop()
-        # same typo with live-looking keys: calls go to the sandbox host, are refused, nothing sold
-        cf_reset(); s0 = sold(kalaa)
+        # same stray space with LIVE keys. Before fix round 1 the calls went to the sandbox host (mismatched trimming)
+        # and failed. Decision 1 (2026-10-17): CASHFREE_ENV is read the same trimmed way everywhere, so health,
+        # payments and the Cashfree client all agree: live keys + "production " = Cashfree production, never sandbox.
+        cf_reset()
         S = Server(APP_ENV='production', NEXT_PUBLIC_SITE_URL='https://thefest.example', CASHFREE_APP_ID='LIVEfake99', CASHFREE_SECRET_KEY='cfsk_ma_prod_fake', CASHFREE_ENV='production ')
         try:
+            s, body = http(S.base, '/api/health')
             st = await login(b, S.base, email)
             r = await post(st, '/api/checkout', {'ticketTypeId': kalaa, 'qty': 1, 'method': 'gateway', 'phone': '9876543210'})
-            check('CASHFREE_ENV="production " + live keys: checkout fails safely (no order kept, seat released)', r['status'] >= 500 and sold(kalaa) == s0, (r, [c['host'] for c in cf_state()['calls']]))
+            hosts = [c['host'] for c in cf_state()['calls']]
+            check('CASHFREE_ENV="production " + live keys: health, checkout and Cashfree calls all agree on production (never sandbox)',
+                  'GATEWAY_TEST_KEYS' not in body and 'NO_LIVE_GATEWAY' not in body and r['body'].get('env') == 'production' and hosts and set(hosts) == {'production'},
+                  (body, r, hosts))
+            if r['body'].get('orderId'):
+                # release the seat the way an abandoned checkout does (order failed, seat back)
+                q(f"with o as (update orders set status = 'failed' where id = '{r['body']['orderId']}' and status = 'pending' returning qty) "
+                  f"update ticket_types set sold = greatest(sold - (select qty from o), 0) where id = '{kalaa}' and exists (select 1 from o)")
         finally:
             S.stop()
 

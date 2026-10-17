@@ -132,7 +132,10 @@ async def main():
             other = await (await b.new_context(**MOBILE)).new_page()
             for i in range(10):
                 await try_login(other, MAIN, 'sponsor@thefest.in', 'wrong-password')
-            check('10 failed logins counted in the database', q("select fails from login_attempts where key='sponsor@thefest.in'") == '10')
+            # Keys since fix round 1: per email + network ('ip:<email>|<ip>') and per email ('e:<email>')
+            check('10 failed logins counted in the database (per network and per email)',
+                  q("select string_agg(fails::text, ',' order by key) from login_attempts where key like 'ip:sponsor@thefest.in|%' or key = 'e:sponsor@thefest.in'") == '10,10',
+                  q("select string_agg(key || '=' || fails, ',') from login_attempts where key like '%sponsor@thefest.in%'"))
             other2 = await (await b.new_context(**MOBILE)).new_page()
             msg = await try_login(other2, A.base, 'sponsor@thefest.in', 'password123')
             check('11th attempt on the OTHER server, right password → "Too many attempts"', 'Too many attempts' in msg, msg)

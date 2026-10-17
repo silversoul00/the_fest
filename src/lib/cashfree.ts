@@ -1,6 +1,7 @@
 import 'server-only';
 import { createHmac } from 'node:crypto';
 import { safeEq } from './payments';
+import { cashfreeEnvSetting } from './env';
 
 /*
  * Cashfree Payment Gateway (PG API, version 2023-08-01).
@@ -10,8 +11,9 @@ import { safeEq } from './payments';
  * Our order UUID is used as Cashfree's order_id, so lookups need no mapping.
  */
 const API_VERSION = '2023-08-01';
-export const cashfreeMode = (): 'sandbox' | 'production' =>
-  process.env.CASHFREE_ENV === 'production' ? 'production' : 'sandbox';
+// Same trimmed reading as health and payments.ts (env.ts), so they can never disagree about live vs sandbox.
+export const cashfreeMode = (): 'sandbox' | 'production' => cashfreeEnvSetting();
+const key = (name: string) => (process.env[name] ?? '').trim();
 const base = () => (cashfreeMode() === 'production' ? 'https://api.cashfree.com/pg' : 'https://sandbox.cashfree.com/pg');
 
 async function cf<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -20,8 +22,8 @@ async function cf<T>(path: string, init: { method?: string; body?: unknown } = {
     headers: {
       'Content-Type': 'application/json',
       'x-api-version': API_VERSION,
-      'x-client-id': process.env.CASHFREE_APP_ID ?? '',
-      'x-client-secret': process.env.CASHFREE_SECRET_KEY ?? '',
+      'x-client-id': key('CASHFREE_APP_ID'),
+      'x-client-secret': key('CASHFREE_SECRET_KEY'),
     },
     body: init.body ? JSON.stringify(init.body) : undefined,
     cache: 'no-store',
@@ -70,7 +72,7 @@ export async function getCashfreePayment(orderId: string): Promise<{ paid: boole
 }
 
 /** Webhook signature: base64(HMAC_SHA256(timestamp + rawBody, secret_key)) */
-export function verifyCashfreeWebhook(rawBody: string, timestamp: string, signature: string, secret = process.env.CASHFREE_SECRET_KEY ?? '') {
+export function verifyCashfreeWebhook(rawBody: string, timestamp: string, signature: string, secret = key('CASHFREE_SECRET_KEY')) {
   if (!secret || !timestamp || !signature) return false;
   const expected = createHmac('sha256', secret).update(timestamp + rawBody).digest('base64');
   return safeEq(expected, signature);

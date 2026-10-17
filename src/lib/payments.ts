@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FeeConfig } from './pricing';
-import { appEnv, cashfreeKeysSet, cashfreeLive, razorpayKeysSet, razorpayLive } from './env';
+import { appEnv, cashfreeKeysSet, cashfreeLive, demoPaymentsRequested, razorpayKeysSet, razorpayLive } from './env';
 
 /* ─── Commission settings (env) ───────────────────────────────────────
  * PLATFORM_FEE_MODE        flat | percent            (default flat)
@@ -33,7 +33,7 @@ export function feeConfig(): FeeConfig {
  * when its keys are set, then Razorpay.
  *
  * Money can never be fake in production:
- *  • In production only LIVE keys count (CASHFREE_ENV=production, rzp_live_…). Test keys there
+ *  • In production only LIVE keys count (CASHFREE_ENV=production and no TEST app id; rzp_live_…). Test keys there
  *    mean "no gateway", so a sandbox payment can never issue a real ticket.
  *  • 'demo' (pretend payment) only when no gateway is configured, DEMO_PAYMENTS=1, and not production.
  *  • Otherwise 'none': card/UPI checkout is switched off; bank UPI and free tickets still work.
@@ -43,13 +43,13 @@ export const cashfreeEnabled = () => cashfreeKeysSet() && (appEnv() !== 'product
 export const razorpayEnabled = () => razorpayKeysSet() && (appEnv() !== 'production' || razorpayLive());
 
 export function activeGateway(): Gateway {
-  const forced = process.env.PAYMENT_GATEWAY;
+  const forced = (process.env.PAYMENT_GATEWAY ?? '').trim().toLowerCase();
   if (forced === 'cashfree' && cashfreeEnabled()) return 'cashfree';
   if (forced === 'razorpay' && razorpayEnabled()) return 'razorpay';
   if (cashfreeEnabled()) return 'cashfree';
   if (razorpayEnabled()) return 'razorpay';
   const anyKeys = cashfreeKeysSet() || razorpayKeysSet();
-  if (!anyKeys && process.env.DEMO_PAYMENTS === '1' && appEnv() !== 'production') return 'demo';
+  if (!anyKeys && demoPaymentsRequested() && appEnv() !== 'production') return 'demo';
   return 'none';
 }
 
@@ -67,20 +67,23 @@ export function gatewayLabel(): string {
 }
 
 /* ─── Razorpay ────────────────────────────────────────────────────── */
+const trimmed = (name: string) => (process.env[name] ?? '').trim();
+export const razorpayKeyId = () => trimmed('RAZORPAY_KEY_ID');
+const rzpKeys = () => ({ key_id: razorpayKeyId(), key_secret: trimmed('RAZORPAY_KEY_SECRET') });
 function safeEq(a: string, b: string) {
   const x = Buffer.from(a), y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
 /** Checkout handler signature: HMAC_SHA256(order_id + "|" + payment_id, key_secret) */
-export function verifyCheckoutSignature(rzpOrderId: string, rzpPaymentId: string, signature: string, secret = process.env.RAZORPAY_KEY_SECRET ?? '') {
+export function verifyCheckoutSignature(rzpOrderId: string, rzpPaymentId: string, signature: string, secret = trimmed('RAZORPAY_KEY_SECRET')) {
   if (!secret) return false;
   const expected = createHmac('sha256', secret).update(`${rzpOrderId}|${rzpPaymentId}`).digest('hex');
   return safeEq(expected, signature);
 }
 
 /** Webhook signature: HMAC_SHA256(raw body, webhook_secret) */
-export function verifyWebhookSignature(rawBody: string, signature: string, secret = process.env.RAZORPAY_WEBHOOK_SECRET ?? '') {
+export function verifyWebhookSignature(rawBody: string, signature: string, secret = trimmed('RAZORPAY_WEBHOOK_SECRET')) {
   if (!secret) return false;
   const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
   return safeEq(expected, signature);
@@ -88,21 +91,21 @@ export function verifyWebhookSignature(rawBody: string, signature: string, secre
 
 export async function createRazorpayOrder(amountPaise: number, receipt: string, notes: Record<string, string>) {
   const Razorpay = (await import('razorpay')).default;
-  const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID!, key_secret: process.env.RAZORPAY_KEY_SECRET! });
+  const rzp = new Razorpay(rzpKeys());
   const order = await rzp.orders.create({ amount: amountPaise, currency: 'INR', receipt, notes });
   return order as { id: string; amount: number; currency: string };
 }
 
 export async function refundRazorpay(paymentId: string, amountPaise: number, note: string) {
   const Razorpay = (await import('razorpay')).default;
-  const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID!, key_secret: process.env.RAZORPAY_KEY_SECRET! });
+  const rzp = new Razorpay(rzpKeys());
   return rzp.payments.refund(paymentId, { amount: amountPaise, notes: { reason: note.slice(0, 200) } });
 }
 
 /** Total already refunded at Razorpay for this payment, in paise. */
 export async function razorpayRefundedTotal(paymentId: string): Promise<number> {
   const Razorpay = (await import('razorpay')).default;
-  const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID!, key_secret: process.env.RAZORPAY_KEY_SECRET! });
+  const rzp = new Razorpay(rzpKeys());
   const p = await rzp.payments.fetch(paymentId);
   return Number(p.amount_refunded ?? 0);
 }
