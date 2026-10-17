@@ -114,7 +114,9 @@ export function normalizeEmail(e: string) {
  *  • Per email + network (IP): 10 failed logins per 15 minutes. A stranger guessing a volunteer's
  *    password from their own phone locks only themselves out, not the volunteer at the gate.
  *  • Per email, from anywhere: 50 failed logins per 15 minutes (looser cap against spread-out guessing).
- * App login and scanner login share the counters.
+ * App login and scanner login share the counters. Every attempt is counted BEFORE the password is checked
+ * (countLoginAttempt), so parallel bursts can't overshoot; a correct password clears the counts.
+ * THE FEST admin can clear a lockout for an email from /admin ("Unlock a login").
  * If the table is missing or the database hiccups, the throttle FAILS OPEN (people can still log in)
  * and the problem is logged to /admin/errors — /api/health also reports the missing table.
  */
@@ -142,33 +144,55 @@ async function logThrottleError(err: unknown, where: string) {
   await reportError(err, where);
 }
 
-export async function loginThrottled(email: string): Promise<boolean> {
+export type LoginGate = 'ok' | 'network' | 'account';
+
+/** Count one attempt on a key and return the new count. Capped at limit + 1 so a blocked flood doesn't grow it. */
+async function bump(key: string, limit: number): Promise<number> {
+  const [r] = await sql<{ fails: number }[]>`
+    insert into login_attempts (key, fails, window_start) values (${key}, 1, now())
+    on conflict (key) do update set
+      fails = case when login_attempts.window_start < now() - interval '15 minutes' then 1
+                   else least(login_attempts.fails + 1, ${limit + 1}::int) end,
+      window_start = case when login_attempts.window_start < now() - interval '15 minutes' then now() else login_attempts.window_start end
+    returning fails`;
+  return r.fails;
+}
+
+/**
+ * Call BEFORE checking the password. Counts this attempt first, atomically (one upsert per key, row-locked),
+ * then says whether it may go on. So 40 attempts fired at the same moment can't all slip past a "check, then
+ * count" gap: at most MAX_FAILS_PER_IP of them get to the password check.
+ *  • 'network' — this email from this network is over its limit (the attempt is not added to the per-email count,
+ *    so one network alone can't use up the account-wide cap).
+ *  • 'account' — this email is over its limit from everywhere; switching network won't help.
+ * A correct password then calls clearFailedLogins, which wipes both counts (including this attempt).
+ */
+export async function countLoginAttempt(email: string): Promise<LoginGate> {
   try {
     const { ipKey, emailKey } = await throttleKeys(email);
-    const [r] = await sql<{ blocked: boolean }[]>`
-      select coalesce(bool_or(window_start > now() - interval '15 minutes' and
-               fails >= case when key = ${ipKey} then ${MAX_FAILS_PER_IP}::int else ${MAX_FAILS_PER_EMAIL}::int end), false) as blocked
-      from login_attempts where key in (${ipKey}, ${emailKey})`;
-    return !!r?.blocked;
+    if ((await bump(ipKey, MAX_FAILS_PER_IP)) > MAX_FAILS_PER_IP) return 'network';
+    if ((await bump(emailKey, MAX_FAILS_PER_EMAIL)) > MAX_FAILS_PER_EMAIL) return 'account';
+    // Made-up emails each leave a row; now and then clear out ones idle for a day.
+    if (Math.random() < 0.02) await sql`delete from login_attempts where window_start < now() - interval '1 day'`;
+    return 'ok';
   } catch (err) {
     await logThrottleError(err, 'login throttle (failing open)');
-    return false;
+    return 'ok';
   }
 }
 
-export async function noteFailedLogin(email: string) {
-  try {
-    const { ipKey, emailKey } = await throttleKeys(email);
-    await sql`
-      insert into login_attempts (key, fails, window_start) values (${ipKey}, 1, now()), (${emailKey}, 1, now())
-      on conflict (key) do update set
-        fails = case when login_attempts.window_start < now() - interval '15 minutes' then 1 else login_attempts.fails + 1 end,
-        window_start = case when login_attempts.window_start < now() - interval '15 minutes' then now() else login_attempts.window_start end`;
-    // Made-up emails each leave a row; now and then clear out ones idle for a day.
-    if (Math.random() < 0.02) await sql`delete from login_attempts where window_start < now() - interval '1 day'`;
-  } catch (err) {
-    await logThrottleError(err, 'login throttle (failing open)');
-  }
+/** What to show when countLoginAttempt says no. */
+export function loginBlockedMessage(gate: Exclude<LoginGate, 'ok'>): string {
+  return gate === 'network'
+    ? 'Too many attempts. Try again in 15 minutes, or switch to mobile data.'
+    : 'Too many attempts on this account. Try again in 15 minutes (switching network won’t help), or ask THE FEST admin to unlock it.';
+}
+
+/** Admin "Unlock a login": removes every count for this email (all networks). Returns how many rows were removed. */
+export async function unlockLogin(email: string): Promise<number> {
+  const e = normalizeEmail(email);
+  const rows = await sql`delete from login_attempts where key = ${`e:${e}`} or left(key, ${e.length + 4}) = ${`ip:${e}|`} returning 1`;
+  return rows.length;
 }
 
 export async function clearFailedLogins(email: string) {

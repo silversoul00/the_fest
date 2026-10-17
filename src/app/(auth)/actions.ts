@@ -3,8 +3,8 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { sql } from '@/lib/db';
 import {
-  clearFailedLogins, createSession, destroySession, hashPassword, loginThrottled,
-  normalizeEmail, noteFailedLogin, PORTAL, verifyPassword,
+  clearFailedLogins, createSession, destroySession, hashPassword, countLoginAttempt,
+  normalizeEmail, loginBlockedMessage, PORTAL, verifyPassword,
 } from '@/lib/auth';
 import { sendVerification } from '@/lib/verify';
 import { reportError } from '@/lib/errors';
@@ -46,12 +46,13 @@ export async function login(_: ActionState, fd: FormData): Promise<ActionState> 
   const email = normalizeEmail(String(fd.get('email') ?? ''));
   const password = String(fd.get('password') ?? '');
   if (!email || !password) return { error: 'Enter your email and password.' };
-  if (await loginThrottled(email)) return { error: 'Too many attempts. Try again in 15 minutes.' };
+  // Count the attempt first, then decide — so a burst of parallel guesses can't overshoot the limit.
+  const gate = await countLoginAttempt(email);
+  if (gate !== 'ok') return { error: loginBlockedMessage(gate) };
 
   const [u] = await sql<{ id: string; password_hash: string; role: Role }[]>`
     select id, password_hash, role from users where email = ${email}`;
   if (!u || !(await verifyPassword(password, u.password_hash))) {
-    await noteFailedLogin(email);
     return { error: 'Wrong email or password.' };
   }
   await clearFailedLogins(email);

@@ -205,7 +205,11 @@ Once 1 or 2 is done, set the secrets — GitHub → repo → **Settings → Secr
 
 Then **Actions → Database backup → Run workflow** once to test. It runs daily at 2 AM and keeps each encrypted backup for 30 days. GitHub pauses the schedule after 60 days with no repo activity — re-enable it under Actions if so. To restore into an empty database: `scripts/restore.sh` (see the comments at its top).
 
-**A volunteer can't log in at the gate ("Too many attempts")?** Someone typed wrong passwords for that email from the same network. They can switch to mobile data / another Wi-Fi, or wait 15 minutes, or you add another volunteer's email under **Volunteers**.
+**A volunteer can't log in at the gate ("Too many attempts")?** Someone typed wrong passwords for that email.
+- Fastest fix: open `/admin` → **Unlock a login** → type their email → **Unlock**. They can log in straight away.
+- Or they wait 15 minutes and try again.
+- If the message says **"on this account"**, switching to mobile data won't help — unlock it or wait. If it doesn't, switching to mobile data usually works (college Wi-Fi often shares one address, so someone else on it may have caused it).
+- The organizer can also add another volunteer's email under **Volunteers** as a backup.
 
 **What `/api/health` problems mean**
 

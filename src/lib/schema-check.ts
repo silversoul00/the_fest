@@ -3,7 +3,8 @@ import { sql } from './db';
 
 /*
  * "Is the database set up for this version of the code?"
- * Every table, and every column added later with `alter table … add column`, that the code relies on.
+ * Every table, and every column added later with `alter table … add column` (including ones added inside a
+ * `do $$ … $$` block, like users.email_verified_at), that the code relies on.
  * Keep in step with db/schema.sql — tests/fixes1.py checks this list against that file.
  * Used by /api/health and the admin System card, so a deploy made before the production SQL was run
  * shows up as a named problem (503) instead of "ok".
@@ -19,7 +20,7 @@ export const REQUIRED_TABLES = [
 ] as const;
 
 export const REQUIRED_COLUMNS = [
-  'users.is_admin',
+  'users.is_admin', 'users.email_verified_at',
   'fests.upi_enabled', 'fests.upi_vpa', 'fests.upi_name', 'fests.inbound_token', 'fests.approved_at', 'fests.approved_by',
   'fests.review_note', 'fests.cancelled_reason', 'fests.allow_transfers',
   'orders.method', 'orders.gateway_fee_paise', 'orders.provider_order_id', 'orders.payment_ref', 'orders.utr',

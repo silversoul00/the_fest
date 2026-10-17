@@ -1,6 +1,6 @@
 'use server';
 import { revalidatePath } from 'next/cache';
-import { requireAdmin } from '@/lib/auth';
+import { normalizeEmail, requireAdmin, unlockLogin } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { isUuid } from '@/lib/http';
 import { sendEmail } from '@/lib/mail';
@@ -66,4 +66,18 @@ export async function refundUnfulfilledAction(fd: FormData) {
   if (!isUuid(id)) return;
   try { await refundUnfulfilled(id); } catch (e) { await reportError(e, 'admin refund'); }
   revalidatePath('/admin', 'layout');
+}
+
+/** Clear a "Too many attempts" lockout for one email (e.g. a gate volunteer someone tried to lock out). */
+export async function unlockLoginAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  await requireAdmin();
+  const email = normalizeEmail(s(fd, 'email'));
+  if (!email.includes('@')) return { error: 'Enter the email that is locked out.' };
+  try {
+    const n = await unlockLogin(email);
+    return n ? { ok: true, message: `Unlocked ${email}. They can log in now.` } : { ok: true, message: `${email} wasn’t locked out.` };
+  } catch (e) {
+    await reportError(e, 'admin unlock login');
+    return { error: 'Couldn’t unlock right now — the database setup may be incomplete (see System above).' };
+  }
 }

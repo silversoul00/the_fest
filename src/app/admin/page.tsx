@@ -5,7 +5,7 @@ import { festMoney } from '@/lib/admin-queries';
 import { dateRange, num, rupees } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty, Stat } from '@/components/ui';
-import { approveFest, sendBackFest } from './actions';
+import { approveFest, sendBackFest, unlockLoginAction } from './actions';
 import { appEnv, configProblems, configWarnings } from '@/lib/env';
 import { gatewayLabel } from '@/lib/payments';
 import { checkTicketKeys } from '@/lib/ticket-crypto';
@@ -80,6 +80,17 @@ export default async function AdminHome() {
       </div>
 
       <SystemCard />
+
+      <section className="card stack g8" aria-label="Unlock a login">
+        <h2 className="h3">Unlock a login</h2>
+        <p className="xs muted">If someone (say a gate volunteer) sees “Too many attempts”, enter their email to let them try again now instead of waiting 15 minutes.</p>
+        <ActionForm action={unlockLoginAction} className="stack g8" resetOnSuccess>
+          <div className="row g8">
+            <input className="input grow" name="email" type="email" required placeholder="volunteer@college.edu" aria-label="Email to unlock" style={{ minWidth: 0 }} />
+            <Submit className="btn outline">Unlock</Submit>
+          </div>
+        </ActionForm>
+      </section>
 
       <h2 className="h3 mt16">Waiting for approval ({review.length})</h2>
       {review.length === 0 ? <Empty icon="✅" title="Nothing to review" /> : review.map((f) => (

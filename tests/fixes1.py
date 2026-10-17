@@ -75,7 +75,9 @@ def schema_items():
     """Tables and later-added columns, straight from db/schema.sql."""
     src = open(os.path.join(ROOT, 'db/schema.sql')).read()
     tables = re.findall(r'^create table if not exists (\w+)', src, re.M)
-    cols = [f'{t}.{c}' for t, c in re.findall(r'^alter table (\w+) add column if not exists (\w+)', src, re.M)]
+    # Any `alter table X add column [if not exists] Y`, at the top level or indented inside a do $$ … $$ block
+    cols = [f'{t}.{c}' for t, c in re.findall(r'^\s*alter table (\w+)\s+add column (?:if not exists )?(\w+)', src, re.M | re.I)]
+    assert 'users.email_verified_at' in cols, 'schema_items() must see columns added inside do $$ blocks'
     return tables, list(dict.fromkeys(cols))
 
 async def main():
