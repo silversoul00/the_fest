@@ -14,8 +14,11 @@ async def login(b, email):
     await pg.click('button[type=submit]'); await pg.wait_for_load_state('networkidle')
     return pg
 
-async def err(pg):
-    await pg.wait_for_selector('.alert.error'); return await pg.text_content('.alert.error')
+async def err(pg, expect):
+    # Wait for this submit's message — the previous error stays on screen until it's replaced
+    try: await pg.wait_for_selector(f'.alert.error:has-text("{expect}")', timeout=10000)
+    except Exception: pass
+    return await pg.text_content('.alert.error')
 
 async def transfer(pg, email, confirm=True):
     await pg.fill('input[name=email]', email)
@@ -34,11 +37,11 @@ async def main():
         await st.goto(f'{B}/tickets/{tid}')
         await st.click('text=Transfer this ticket to a friend')
         await transfer(st, 'nobody-xyz@example.com')
-        check('transfer to unknown email refused', 'sign up first' in await err(st))
+        check('transfer to unknown email refused', 'sign up first' in await err(st, 'sign up first'))
         await transfer(st, 'organizer@thefest.in')
-        check('transfer to organizer account refused', 'student accounts' in await err(st))
+        check('transfer to organizer account refused', 'student accounts' in await err(st, 'student accounts'))
         await st.uncheck('input[name=confirm]'); await transfer(st, 'volunteer@thefest.in', confirm=False)
-        check('transfer needs confirmation', 'Tick the box' in await err(st))
+        check('transfer needs confirmation', 'Tick the box' in await err(st, 'Tick the box'))
         await transfer(st, 'volunteer@thefest.in')
         await st.wait_for_url('**/tickets?sent=*')
         check('transfer succeeds', 'Ticket sent to Kiran' in await st.text_content('.alert.ok'))

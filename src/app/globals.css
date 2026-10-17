@@ -282,3 +282,51 @@ img, svg { display: block; max-width: 100%; }
 .legal li { margin-bottom: 6px; }
 .legal b { color: var(--white, #fff); font-weight: 600; }
 .legal a { color: var(--accent); }
+
+/* ─── Charts (src/components/charts.tsx) ─────────────────────
+   One validated series colour on the dark card surface (#111114):
+   --viz-1 passes lightness, chroma and 3:1 contrast. Track = darker step of the same ramp. */
+:root { --viz-1: #3987e5; --viz-track: #184f95; --viz-grid: rgba(255,255,255,.07); }
+.viz { position: relative; }
+.viz-plot { display: flex; gap: 8px; }
+.viz-yaxis { position: relative; width: 34px; flex: none; }
+.viz-yaxis span { position: absolute; right: 0; transform: translateY(-50%); font-family: var(--f-mono); font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.viz-area { position: relative; flex: 1; min-width: 0; outline-offset: 4px; touch-action: pan-y; }
+.viz-grid { position: absolute; left: 0; right: 0; height: 1px; background: var(--viz-grid); }
+.viz-cols { position: absolute; inset: 0; display: flex; align-items: flex-end; }
+.viz-col { flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; padding: 0 1px; cursor: default; }
+.viz-col:focus-visible { outline: 1px solid var(--soft); outline-offset: 0; }
+.viz-bar { width: min(24px, 100%); min-height: 0; background: var(--viz-1); border-radius: 4px 4px 0 0; transition: filter .12s; }
+.viz-col.on .viz-bar { filter: brightness(1.25); }
+.viz-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.viz-line { fill: none; stroke: var(--viz-1); stroke-width: 2px; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.viz-wash { fill: var(--viz-1); opacity: .1; }
+.viz-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--viz-1); box-shadow: 0 0 0 2px var(--gray); transform: translate(-50%, -50%); pointer-events: none; }
+.viz-endlabel { position: absolute; right: 0; transform: translate(0, -160%); font-family: var(--f-mono); font-size: 11px; color: var(--white); }
+.viz-cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-strong); pointer-events: none; }
+.viz-tip { position: absolute; top: -6px; translate: 0 -100%; z-index: 5; pointer-events: none; display: flex; flex-direction: column; gap: 1px;
+  background: var(--high); border: 1px solid var(--border-strong); padding: 6px 9px; white-space: nowrap; font-size: 12px; }
+.viz-tip strong { color: var(--white); font-weight: 600; }
+.viz-tip span { color: var(--soft); font-size: 11px; }
+.viz-xaxis { display: flex; margin: 6px 0 0 42px; font-family: var(--f-mono); font-size: 9px; color: var(--dim); }
+.viz-xaxis span { flex: 1; text-align: center; white-space: nowrap; overflow: visible; min-width: 0; }
+.viz-xaxis.ends { justify-content: space-between; }
+.viz-xaxis.ends span { flex: none; }
+.viz-bars { display: flex; flex-direction: column; gap: 12px; }
+.viz-barrow { outline-offset: 4px; }
+.viz-barlabel { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--soft); margin-bottom: 5px; }
+.viz-barval { font-family: var(--f-mono); font-size: 12px; color: var(--white); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.viz-track { height: 8px; border-radius: 0 4px 4px 0; }
+.viz-track[data-meter] { background: color-mix(in srgb, var(--viz-track) 55%, transparent); }
+.viz-fill { height: 100%; background: var(--viz-1); border-radius: 0 4px 4px 0; min-width: 2px; transition: filter .12s; }
+.viz-barrow.on .viz-fill { filter: brightness(1.25); }
+.viz-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+.viz-table th, .viz-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.viz-table th { font-family: var(--f-mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 400; }
+.viz-table td.n, .viz-table th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.viz-details > summary { cursor: pointer; font-family: var(--f-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin-top: 14px; }
+.viz-details > summary:hover { color: var(--soft); }
+.kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 860px) { .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.an-grid { display: grid; gap: 16px; }
+@media (min-width: 1000px) { .an-grid.two { grid-template-columns: 1fr 1fr; } }
