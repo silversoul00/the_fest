@@ -28,7 +28,7 @@ async def login(b, email, ctx_opts=MOBILE, clock=False):
     return pg
 
 async def no_sideways(pg):
-    return await pg.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1')
+    return await pg.evaluate('document.documentElement.scrollWidth <= Math.min(window.innerWidth, screen.width) + 1')
 
 async def main():
     # ── Health (criterion 7) ──

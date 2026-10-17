@@ -102,7 +102,7 @@ async def main():
             await pg.goto(BASE + '/admin'); await pg.wait_for_load_state('networkidle')
             box = pg.locator('section[aria-label="Unlock a login"]')
             check('/admin shows "Unlock a login"', await box.count() == 1)
-            check('/admin: no sideways scroll at 390px', await pg.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'))
+            check('/admin: no sideways scroll at 390px', await pg.evaluate('document.documentElement.scrollWidth <= Math.min(window.innerWidth, screen.width) + 1'))
             await box.locator('input[name=email]').fill('Volunteer@TheFest.in ')
             await box.locator('button[type=submit]').click(); await pg.wait_for_timeout(1500)
             text = await box.inner_text()

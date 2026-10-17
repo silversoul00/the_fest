@@ -70,7 +70,7 @@ async def post(pg, path, data):
         .then(async r => ({status: r.status, body: await r.json().catch(() => ({}))}))""", [path, data])
 
 async def no_sideways(pg):
-    return await pg.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1')
+    return await pg.evaluate('document.documentElement.scrollWidth <= Math.min(window.innerWidth, screen.width) + 1')
 
 def tt(slug, name): return q(f"select tt.id from ticket_types tt join fests f on f.id=tt.fest_id where f.slug='{slug}' and tt.name='{name}'")
 def sold(tid): return q(f"select sold from ticket_types where id='{tid}'")

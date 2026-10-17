@@ -60,4 +60,8 @@ python3 tests/prod_extra.py
 python3 tests/fixes1.py
 # Fix round 2 (2026-10-17): login throttle counts first (parallel bursts can't overshoot), admin "Unlock a login"
 python3 tests/throttle.py
+# Tester round 2 (2026-10-17): the supervisor's round-2 plan on database copies (:3006): production detection and
+# money with a fake Cashfree, 200-way login bursts, 60 rotating networks, admin "Unlock a login" abuse and odd emails,
+# missing tables/columns, Part 2a on old databases, error-log bursts and pruning, /setup/keys, 390/1280 screenshots
+python3 tests/round2.py
 echo "✓ Release check passed"

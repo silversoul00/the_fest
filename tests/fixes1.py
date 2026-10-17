@@ -269,7 +269,7 @@ async def main():
             await pg.click('button:has-text("Make a different pair")'); await pg.wait_for_timeout(500)
             body_part = priv.split('\\n')[1][:30]
             check('/setup/keys (keys set): no request carries the new private key, no POST', not any(body_part in s for s in sent) and not any(s.startswith('POST') for s in sent), len(sent))
-            check('/setup/keys (keys set) fits 390px', await pg.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1'))
+            check('/setup/keys (keys set) fits 390px', await pg.evaluate('document.documentElement.scrollWidth <= Math.min(window.innerWidth, screen.width) + 1'))
             await pg.screenshot(path=f'{E2E}/setup_keys_other_env_390.png', full_page=True)
         finally:
             S.stop()
@@ -299,7 +299,7 @@ async def main():
             st = await login(b, S.base, 'student@thefest.in')
             for path in ['/fests', '/tickets', '/me']:
                 await st.goto(S.base + path); x = await left_edge(st, 'main h1, main .h1, main h2, main .h2')
-                wide = await st.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1')
+                wide = await st.evaluate('document.documentElement.scrollWidth <= Math.min(window.innerWidth, screen.width) + 1')
                 check(f'390px {path} (student): still has its margin and no sideways scroll', 12 <= x < 60 and wide, x)
         finally:
             S.stop()
