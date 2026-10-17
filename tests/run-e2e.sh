@@ -19,7 +19,11 @@ for d in /proc/[0-9]*; do c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true); c
 sleep 1
 
 npm run -s db:setup
+npm run -s db:setup   # twice: the schema must be safe to re-run
 npm run -s db:seed -- --reset > /dev/null
+# Local test settings (never set in Vercel): the pretend demo checkout, a test-only error route,
+# and an admin address for error alerts. Production-mode behaviour is tested in tests/prod.py.
+export DEMO_PAYMENTS=1 E2E_ERROR_ROUTE=1 ADMIN_EMAILS=admin@thefest.in
 PORT=3000 npx next start > "$E2E_DIR/server.log" 2>&1 &
 SERVER=$!; trap 'kill $SERVER 2>/dev/null || true' EXIT
 for i in $(seq 1 30); do curl -sf localhost:3000/api/health > /dev/null && break; sleep 1; done
@@ -42,4 +46,8 @@ export RACE_TT=$(eval "$PSQL" -c "\"update ticket_types set quota = sold + 1 whe
 python3 tests/race.py
 python3 tests/team.py
 python3 tests/analytics.py
+python3 tests/errors.py
+# Production-mode checks start their own servers on :3001/:3002 (APP_ENV=production etc.)
+python3 tests/prod.py
+bash tests/ops.sh
 echo "✓ Release check passed"

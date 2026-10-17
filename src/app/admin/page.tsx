@@ -6,6 +6,40 @@ import { dateRange, num, rupees } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty, Stat } from '@/components/ui';
 import { approveFest, sendBackFest } from './actions';
+import { appEnv, configProblems, configWarnings } from '@/lib/env';
+import { gatewayLabel } from '@/lib/payments';
+import { checkTicketKeys } from '@/lib/ticket-crypto';
+
+/** Admin-only: how the app is set up right now. Names of settings only, never their values. */
+async function SystemCard() {
+  const problems = configProblems();
+  const warnings = configWarnings();
+  const keys = checkTicketKeys();
+  const [{ errs }] = await sql<{ errs: number }[]>`select count(*)::int errs from app_errors where at > now() - interval '24 hours'`;
+  const gw = gatewayLabel();
+  const rows: [string, string, boolean][] = [
+    ['Database', 'up', true],
+    ['Card/UPI gateway', gw, gw.endsWith('live') || (appEnv() !== 'production' && gw !== 'none')],
+    ['Email', process.env.RESEND_API_KEY ? 'resend' : 'not configured (kept in outbox)', !!process.env.RESEND_API_KEY],
+    ['Ticket signing keys', keys === 'ok' ? 'OK' : keys, keys === 'ok'],
+    ['Environment', appEnv(), true],
+    ['Errors (24h)', String(errs), errs === 0],
+  ];
+  return (
+    <section className="card stack g8" aria-label="System">
+      <div className="row between"><h2 className="h3">System</h2>
+        <span className={`badge ${problems.length ? 'red' : 'green'}`}>{problems.length ? `${problems.length} to fix` : 'all good'}</span></div>
+      <div className="stack g4 small">
+        {rows.map(([k, v, ok]) => (
+          <div key={k} className="row between g8"><span className="soft">{k}</span><span className={`mono ${ok ? 'c-green' : 'c-orange'}`} style={{ textAlign: 'right' }}>{v}</span></div>
+        ))}
+      </div>
+      {problems.length > 0 && <div className="alert error" style={{ wordBreak: 'break-word' }}>Fix in Vercel → Settings → Environment Variables, then redeploy: {problems.join(', ')}</div>}
+      {warnings.length > 0 && <div className="alert info" style={{ wordBreak: 'break-word' }}>Heads-up: {warnings.join(', ')}{warnings.includes('NO_LIVE_GATEWAY') ? ' — card/UPI checkout is off; bank UPI and free tickets still work.' : ''}</div>}
+      {errs > 0 && <Link className="accent small" href="/admin/errors">See errors →</Link>}
+    </section>
+  );
+}
 
 export default async function AdminHome() {
   // Every admin page checks for itself: layouts don't run on client-side navigation requests.
@@ -38,6 +72,8 @@ export default async function AdminHome() {
         <span>{counts.live} fests live</span><span>·</span><span>{num(counts.users)} users</span><span>·</span>
         <Link className="accent" href="/admin/orders?flagged=1">{flagged[0].n} payments need a look →</Link>
       </div>
+
+      <SystemCard />
 
       <h2 className="h3 mt16">Waiting for approval ({review.length})</h2>
       {review.length === 0 ? <Empty icon="✅" title="Nothing to review" /> : review.map((f) => (

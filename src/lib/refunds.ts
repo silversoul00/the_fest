@@ -4,6 +4,7 @@ import { OrderError } from './orders';
 import { cashfreeRefundedTotal, cashfreeRefundId, refundCashfree } from './cashfree';
 import { razorpayRefundedTotal, refundRazorpay } from './payments';
 import { notifyRefund } from './mail';
+import { afterResponse, reportError } from './errors';
 
 /**
  * Cancel unused tickets in an order and refund their share of what the student paid
@@ -57,11 +58,11 @@ export async function refundOrder(orderId: string, opts: { festId: string; ticke
       await sql`update orders set refund_status = case when refund_failed_paise > 0 then 'failed' else 'done' end where id = ${orderId}`;
     } catch (e) {
       gatewayOk = false;
-      console.error('gateway refund failed', orderId, e);
+      await reportError(e, `gateway refund failed (order ${orderId})`);
       await sql`update orders set refund_status = 'failed', refund_failed_paise = refund_failed_paise + ${res.amount}, review_flag = ${'Refund failed at payment gateway — retry from admin'} where id = ${orderId}`;
     }
   }
-  if (res.amount > 0) notifyRefund(orderId, res.amount, opts.reason).catch(() => {});
+  if (res.amount > 0) await afterResponse('refund email', () => notifyRefund(orderId, res.amount, opts.reason));
   return { ...res, gatewayOk };
 }
 
@@ -141,9 +142,9 @@ export async function refundUnfulfilled(orderId: string) {
     else if (o.razorpay_payment_id) await refundRazorpay(o.razorpay_payment_id, o.amount_paise, 'Payment could not be used');
     else throw new Error('No payment id');
     await sql`update orders set refund_status = 'done', review_flag = null where id = ${orderId}`;
-    notifyRefund(orderId, o.amount_paise, 'Your payment arrived after tickets could no longer be issued').catch(() => {});
+    await afterResponse('refund email', () => notifyRefund(orderId, o.amount_paise, 'Your payment arrived after tickets could no longer be issued'));
   } catch (e) {
-    console.error('refund failed', orderId, e);
+    await reportError(e, `refund failed (order ${orderId})`);
     await sql`update orders set refund_status = 'failed', refund_failed_paise = ${o.amount_paise},
                 review_flag = 'Refund failed at payment gateway — retry from admin' where id = ${orderId}`;
     throw new OrderError('The gateway refused the refund — it’s flagged to retry.');

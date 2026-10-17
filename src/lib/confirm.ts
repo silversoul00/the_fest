@@ -2,10 +2,14 @@ import 'server-only';
 import { sql } from './db';
 import { fulfilOrder, OrderError } from './orders';
 import { notifyOrderPaid } from './mail';
+import { providerTrusted } from './payments';
+import { afterResponse } from './errors';
 
 /** Confirm a Cashfree order after Cashfree itself says it is PAID. Checks the amount too. */
 export async function confirmCashfree(orderId: string, p: { paid: boolean; paymentId?: string; amountPaise?: number }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!p.paid) return { ok: false, error: 'Not paid.' };
+  // Never accept a sandbox (test) payment as real money in production
+  if (!providerTrusted('cashfree')) return { ok: false, error: 'Card payments are switched off right now.' };
   const [o] = await sql<{ amount_paise: number; status: string }[]>`select amount_paise, status from orders where id = ${orderId}`;
   if (!o) return { ok: false, error: 'Order not found.' };
   if (o.status === 'paid') return { ok: true };
@@ -15,7 +19,7 @@ export async function confirmCashfree(orderId: string, p: { paid: boolean; payme
   }
   try {
     const r = await fulfilOrder(orderId, { provider: 'cashfree', paymentId: p.paymentId });
-    if (!r.already) notifyOrderPaid(orderId).catch(() => {});
+    if (!r.already) await afterResponse('ticket email', () => notifyOrderPaid(orderId));
     return { ok: true };
   } catch (e) {
     if (e instanceof OrderError) return { ok: false, error: e.message };

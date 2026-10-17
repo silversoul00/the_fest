@@ -2,11 +2,13 @@ import 'server-only';
 import { createHash, randomBytes } from 'node:crypto';
 import { sql } from './db';
 import { sendEmail } from './mail';
+import { siteUrl } from './env';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /** Emails a 48-hour verification link. Max 3 per account per hour. Returns false if throttled. */
 export async function sendVerification(userId: string): Promise<boolean> {
+  const site = siteUrl(); // throws first if the site address isn't set, so no unusable token is stored
   const [u] = await sql<{ email: string; name: string; verified: boolean }[]>`
     select email::text, name, email_verified_at is not null as verified from users where id = ${userId}`;
   if (!u || u.verified) return true;
@@ -15,7 +17,6 @@ export async function sendVerification(userId: string): Promise<boolean> {
   if (n >= 3) return false;
   const token = randomBytes(32).toString('base64url');
   await sql`insert into email_verifications (token_hash, user_id, expires_at) values (${sha256(token)}, ${userId}, now() + interval '48 hours')`;
-  const site = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
   await sendEmail(u.email, 'Confirm your email for THE FEST', [
     `Hi ${u.name.split(' ')[0]},`, '',
     'Tap to confirm this is your email address:', '',

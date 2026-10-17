@@ -342,3 +342,32 @@ alter table orders add column if not exists refund_status text check (refund_sta
 -- Set while an admin retry of a failed gateway refund is in flight (claim, so two retries can't both pay)
 alter table orders add column if not exists refund_retry_at timestamptz;
 alter table orders add column if not exists refund_failed_paise int not null default 0;  -- gateway refund amount awaiting retry
+
+-- v2.2 (Oct 2026): production readiness
+-- Failed-login counter shared by every server instance (Vercel runs many). Key = normalized email.
+create table if not exists login_attempts (
+  key           text primary key,
+  fails         int not null default 0,
+  window_start  timestamptz not null default now()
+);
+
+-- Built-in error log, shown on /admin/errors
+create table if not exists app_errors (
+  id       bigserial primary key,
+  at       timestamptz not null default now(),
+  where_   text,
+  message  text,
+  digest   text,
+  path     text
+);
+create index if not exists app_errors_at_idx on app_errors(at desc);
+
+-- One row: when the last "new errors" email went to the admins (at most one per 15 minutes)
+create table if not exists app_alert_state (
+  id             int primary key default 1 check (id = 1),
+  last_alert_at  timestamptz not null default now()
+);
+
+alter table login_attempts  enable row level security;
+alter table app_errors      enable row level security;
+alter table app_alert_state enable row level security;

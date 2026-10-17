@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import QRCode from 'qrcode';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
+import { siteUrl } from '@/lib/env';
 import { PrintButton } from './PrintButton';
 
 export const metadata = { title: 'Booth QR poster' };
@@ -15,7 +16,7 @@ export default async function BoothPoster({ params }: { params: Promise<{ code: 
     select s.brand, s.email::text, f.name as fest_name, f.organizer_id from sponsors s join fests f on f.id = s.fest_id where s.booth_code = ${code}`;
   if (!b || (b.organizer_id !== user.id && !(user.verified && b.email === user.email))) notFound();
 
-  const url = `${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/booth/${code}`;
+  const url = `${siteUrl()}/booth/${code}`;
   const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'H', color: { dark: '#080808', light: '#FFFFFF' } });
 
   return (

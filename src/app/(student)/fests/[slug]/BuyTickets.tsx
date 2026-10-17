@@ -7,7 +7,7 @@ import { rupees } from '@/lib/format';
 import { quote, type FeeConfig, type Method } from '@/lib/pricing';
 
 type T = { id: string; name: string; description: string; price: number; left: number };
-type Gateway = 'cashfree' | 'razorpay' | 'demo';
+type Gateway = 'cashfree' | 'razorpay' | 'demo' | 'none';
 type Upi = { orderId: string; amount: number; vpa: string; payee: string; note: string; link: string };
 
 declare global {
@@ -41,6 +41,8 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
   const [sel, setSel] = useState(types.find((t) => t.left > 0)?.id ?? '');
   const [qty, setQty] = useState(1);
   const [method, setMethod] = useState<Method>(upiEnabled ? 'upi_direct' : 'gateway');
+  // With card checkout off, bank UPI is the only way to pay
+  useEffect(() => { if (gateway === 'none' && upiEnabled) setMethod('upi_direct'); }, [gateway, upiEnabled]);
   const [phone, setPhone] = useState('');
   const [needPhone, setNeedPhone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -121,6 +123,9 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
 
   const gwQuote = t ? quote(t.price, qty, feeCfg, 'gateway') : null;
   const isPaid = (t?.price ?? 0) > 0;
+  // Card/UPI checkout switched off (no live payment gateway yet): bank UPI and free tickets still work.
+  const cardOff = gateway === 'none';
+  const notOnSale = cardOff && isPaid && !upiEnabled;
 
   return (
     <div className="stack g12">
@@ -140,7 +145,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
         })}
       </div>
 
-      {t && t.left > 0 && q && (
+      {t && t.left > 0 && q && !notOnSale && (
         <>
           <div className="row between">
             <span className="label">Quantity</span>
@@ -151,7 +156,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
             </div>
           </div>
 
-          {isPaid && upiEnabled && (
+          {isPaid && upiEnabled && !cardOff && (
             <div className="stack g8" role="radiogroup" aria-label="Payment method">
               <span className="label">Pay with</span>
               {([['upi_direct', 'UPI to the fest', 'No payment fee · ticket confirmed in a few minutes'], ['gateway', 'Card / UPI checkout', `Instant ticket · +${rupees(gwQuote?.gatewayFee ?? 0)} payment charges`]] as const).map(([m, l, d]) => (
@@ -178,6 +183,14 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
         </>
       )}
 
+      {cardOff && isPaid && t && t.left > 0 && (
+        <div className="alert info" role="note">
+          {upiEnabled
+            ? 'Online card/UPI payment opens soon. For now, pay by UPI straight to the fest — no extra fee.'
+            : 'Online card/UPI payment opens soon. This ticket can’t be bought online yet.'}
+        </div>
+      )}
+
       {err && <div className="alert error" role="alert">{err}</div>}
 
       {!signedIn ? (
@@ -185,8 +198,8 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
       ) : !isStudent ? (
         <div className="alert info">Tickets are bought from a student account. Log out and sign in as a student to buy.</div>
       ) : (
-        <button className="btn block" onClick={buy} disabled={busy || !t || t.left <= 0}>
-          {busy ? 'Opening payment…' : !q || q.total === 0 ? 'Get free ticket →' : method === 'upi_direct' ? `Pay ${rupees(q.total)} by UPI →` : `Pay ${rupees(q.total)} →`}
+        <button className="btn block" onClick={buy} disabled={busy || !t || t.left <= 0 || notOnSale}>
+          {notOnSale ? 'Not on sale online yet' : busy ? 'Opening payment…' : !q || q.total === 0 ? 'Get free ticket →' : method === 'upi_direct' ? `Pay ${rupees(q.total)} by UPI →` : `Pay ${rupees(q.total)} →`}
         </button>
       )}
       {signedIn && isStudent && <p className="xs muted" style={{ textAlign: 'center' }}>By continuing you agree to the <Link href="/legal/terms" className="soft">terms</Link> and <Link href="/legal/refunds" className="soft">refund policy</Link>.</p>}

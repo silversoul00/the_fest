@@ -3,6 +3,7 @@
 //
 //   npm run db:seed            → only runs on an empty database
 //   npm run db:seed -- --reset → WIPES ALL DATA first (local/dev only!)
+//   Refuses any non-local DATABASE_URL unless --allow-remote is passed.
 //
 // Demo logins (password: password123)
 //   student@thefest.in · organizer@thefest.in · sponsor@thefest.in · volunteer@thefest.in
@@ -12,6 +13,13 @@ import postgres from 'postgres';
 import { loadEnv } from './env.mjs';
 
 loadEnv();
+// Demo data includes an admin account with a public password, so it must never reach a real database.
+const isLocalDb = (url) => { const m = (url ?? '').match(/@([^/@?]+?)(?::\d+)?(?:[/?]|$)/); return !!m && ['localhost', '127.0.0.1', '[::1]'].includes(m[1].toLowerCase()); };
+if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is not set (put it in .env.local)'); process.exit(1); }
+if (!isLocalDb(process.env.DATABASE_URL) && !process.argv.includes('--allow-remote')) {
+  console.error('Refusing to seed: DATABASE_URL is not a local database. Demo data (with a demo admin account and the password "password123") must never go into a real database. If this really is a throwaway test database, add --allow-remote.');
+  process.exit(1);
+}
 const sql = postgres(process.env.DATABASE_URL, { prepare: false, max: 1, onnotice: () => {}, ssl: /@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL ?? '') ? false : 'require' });
 const reset = process.argv.includes('--reset');
 
@@ -44,7 +52,7 @@ try {
       console.error('Refusing to --reset a Supabase database. Add --yes-really if you are sure.');
       process.exit(1);
     }
-    await sql`truncate email_verifications, payouts, upi_credits, fest_members, password_resets, email_outbox, sponsor_visits, sponsors, announcements, schedule_events, fest_staff, scans, tickets, orders, ticket_types, fests, sessions, users restart identity cascade`;
+    await sql`truncate login_attempts, app_errors, app_alert_state, email_verifications, payouts, upi_credits, fest_members, password_resets, email_outbox, sponsor_visits, sponsors, announcements, schedule_events, fest_staff, scans, tickets, orders, ticket_types, fests, sessions, users restart identity cascade`;
     console.log('• wiped');
   }
 

@@ -6,11 +6,12 @@ import { ActionForm, Submit } from '@/components/forms';
 import { Empty, Stat } from '@/components/ui';
 import { confirmUpiOrder, pasteAlerts, rejectUpiOrder, rotateInboundToken, saveUpiSettings, uploadStatement } from '../../actions';
 import { PasteAlertsForm, UploadStatementForm } from './CreditForms';
+import { siteUrlOrNull } from '@/lib/env';
 
 export default async function Payments({ params }: { params: Promise<{ festId: string }> }) {
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
-  const site = process.env.NEXT_PUBLIC_SITE_URL ?? '';
+  const site = siteUrlOrNull() ?? '';
 
   const [review, waiting, counts, credits] = await Promise.all([
     sql<{ id: string; amount_paise: number; utr: string | null; utr_submitted_at: Date | null; review_flag: string | null; status: string; name: string; email: string; qty: number; type: string; created_at: Date }[]>`

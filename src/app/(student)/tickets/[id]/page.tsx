@@ -5,6 +5,7 @@ import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { dateRange, time } from '@/lib/format';
 import { signTicket } from '@/lib/ticket-crypto';
+import { reportError } from '@/lib/errors';
 import { isUuid } from '@/lib/http';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { ActionForm, Submit } from '@/components/forms';
@@ -42,14 +43,20 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
   }
   const canTransfer = t.status === 'valid' && t.allow_transfers && t.fest_status !== 'cancelled' && t.fest_status !== 'ended' && t.ends_on >= todayIST();
 
-  const payload = signTicket(t.id, t.fest_id);
-  const svg = await QRCode.toString(payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#080808', light: '#F5F0E8' } });
+  // If the signing key is missing or broken, show the backup code instead of crashing the page.
+  let svg = '';
+  try {
+    const payload = signTicket(t.id, t.fest_id);
+    svg = await QRCode.toString(payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#080808', light: '#F5F0E8' } });
+  } catch (e) {
+    await reportError(e, 'ticket QR');
+  }
   const used = t.status === 'used';
 
   return (
     <div className="wrap stack g16" style={{ maxWidth: 440 }}>
       <Link href="/tickets" className="label">← My tickets</Link>
-      {!used && <AutoRefresh seconds={8} />}
+      {!used && <AutoRefresh seconds={15} stopAfterMinutes={10} />}
 
       <div className={`ticket ${used ? 'used' : ''}`}>
         <div className="ticket-top">
@@ -66,7 +73,9 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
         </div>
         <div className="ticket-perf" />
         <div className="ticket-qr">
-          <div dangerouslySetInnerHTML={{ __html: svg }} aria-label="Ticket QR code" role="img" />
+          {svg
+            ? <div dangerouslySetInnerHTML={{ __html: svg }} aria-label="Ticket QR code" role="img" />
+            : <div className="alert info" role="status">The QR code can’t be shown right now. Your ticket is safe — show the code below at the gate, or try again in a few minutes.</div>}
           <div className="ticket-code">{t.code}</div>
           <div className="xs" style={{ color: 'rgba(8,8,8,.55)', textAlign: 'center' }}>
             {used ? `Checked in at ${time(t.checked_in_at!)}${t.gate ? ` · ${t.gate}` : ''}` : 'Turn your brightness up at the gate'}

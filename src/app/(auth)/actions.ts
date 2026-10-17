@@ -7,6 +7,7 @@ import {
   normalizeEmail, noteFailedLogin, PORTAL, verifyPassword,
 } from '@/lib/auth';
 import { sendVerification } from '@/lib/verify';
+import { reportError } from '@/lib/errors';
 import type { ActionState, Role } from '@/lib/types';
 
 const safeNext = (n: FormDataEntryValue | null) => {
@@ -36,7 +37,7 @@ export async function signup(_: ActionState, fd: FormData): Promise<ActionState>
     insert into users (email, password_hash, name, phone, college, role)
     values (${email}, ${await hashPassword(d.password)}, ${d.name}, ${d.phone || null}, ${d.college || null}, ${d.role})
     returning id`;
-  await sendVerification(u.id).catch(() => {});
+  await sendVerification(u.id).catch((e) => reportError(e, 'verification email'));
   await createSession(u.id, 'app');
   redirect(safeNext(fd.get('next')) || (d.role === 'organizer' ? '/organizer/new' : PORTAL[d.role as Role]));
 }
@@ -45,15 +46,15 @@ export async function login(_: ActionState, fd: FormData): Promise<ActionState> 
   const email = normalizeEmail(String(fd.get('email') ?? ''));
   const password = String(fd.get('password') ?? '');
   if (!email || !password) return { error: 'Enter your email and password.' };
-  if (loginThrottled(email)) return { error: 'Too many attempts. Try again in 15 minutes.' };
+  if (await loginThrottled(email)) return { error: 'Too many attempts. Try again in 15 minutes.' };
 
   const [u] = await sql<{ id: string; password_hash: string; role: Role }[]>`
     select id, password_hash, role from users where email = ${email}`;
   if (!u || !(await verifyPassword(password, u.password_hash))) {
-    noteFailedLogin(email);
+    await noteFailedLogin(email);
     return { error: 'Wrong email or password.' };
   }
-  clearFailedLogins(email);
+  await clearFailedLogins(email);
   await createSession(u.id, 'app');
   redirect(safeNext(fd.get('next')) || PORTAL[u.role]);
 }

@@ -4,6 +4,7 @@ import { sql } from './db';
 import { fulfilOrder, OrderError } from './orders';
 import { UTR_RE, type Credit } from './upi-parse';
 import { notifyOrderPaid } from './mail';
+import { afterResponse } from './errors';
 
 export type MatchResult = {
   matched: { orderId: string; utr: string | null; amountPaise: number; how: 'utr' | 'amount' }[];
@@ -98,7 +99,7 @@ export async function matchCredits(
       await fulfilOrder(order.id, { provider: 'upi_direct', paymentId: c.utr ?? undefined, verifySource: source });
       await sql`update upi_credits set matched_order_id = ${order.id} where id = ${creditId}`;
       res.matched.push({ orderId: order.id, utr: c.utr, amountPaise: c.amountPaise, how });
-      notifyOrderPaid(order.id).catch(() => {});
+      await afterResponse('ticket email', () => notifyOrderPaid(order.id));
     } catch (e) {
       const reason = e instanceof OrderError ? e.message : 'Could not confirm';
       await flag(order.id, creditId, c, reason);
@@ -139,7 +140,7 @@ export async function confirmManually(orderId: string, festId: string) {
     select id, utr from orders where id = ${orderId} and fest_id = ${festId} and method = 'upi_direct' and status in ('pending', 'failed')`;
   if (!o) throw new OrderError('Order not found or already handled.');
   await fulfilOrder(o.id, { provider: 'upi_direct', paymentId: o.utr ?? undefined, verifySource: 'manual' });
-  notifyOrderPaid(o.id).catch(() => {});
+  await afterResponse('ticket email', () => notifyOrderPaid(o.id));
 }
 
 /** Organizer rejects an order (no money arrived). Seats go back on sale. */

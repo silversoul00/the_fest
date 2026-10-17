@@ -108,17 +108,28 @@ export function normalizeEmail(e: string) {
   return e.trim().toLowerCase();
 }
 
-// Light brute-force protection: max 10 failed logins per email per 15 min.
-const attempts = new Map<string, { n: number; until: number }>();
-export function loginThrottled(email: string): boolean {
-  const a = attempts.get(email);
-  return !!a && a.n >= 10 && a.until > Date.now();
+/*
+ * Brute-force protection: max 10 failed logins per email per 15 minutes.
+ * Kept in the database (login_attempts), so it holds across every server instance and restart —
+ * on Vercel each request may hit a different instance. App login and scanner login share the counter.
+ */
+const MAX_FAILS = 10;
+
+export async function loginThrottled(email: string): Promise<boolean> {
+  const [r] = await sql<{ blocked: boolean }[]>`
+    select fails >= ${MAX_FAILS} and window_start > now() - interval '15 minutes' as blocked
+    from login_attempts where key = ${normalizeEmail(email)}`;
+  return !!r?.blocked;
 }
-export function noteFailedLogin(email: string) {
-  const a = attempts.get(email);
-  if (!a || a.until < Date.now()) attempts.set(email, { n: 1, until: Date.now() + 15 * 6e4 });
-  else a.n++;
+
+export async function noteFailedLogin(email: string) {
+  await sql`
+    insert into login_attempts (key, fails, window_start) values (${normalizeEmail(email)}, 1, now())
+    on conflict (key) do update set
+      fails = case when login_attempts.window_start < now() - interval '15 minutes' then 1 else login_attempts.fails + 1 end,
+      window_start = case when login_attempts.window_start < now() - interval '15 minutes' then now() else login_attempts.window_start end`;
 }
-export function clearFailedLogins(email: string) {
-  attempts.delete(email);
+
+export async function clearFailedLogins(email: string) {
+  await sql`delete from login_attempts where key = ${normalizeEmail(email)}`;
 }

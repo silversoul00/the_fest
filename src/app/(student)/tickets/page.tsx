@@ -48,7 +48,7 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
   return (
     <div className="wrap stack g16">
       <h1 className="h2 mt8">My tickets</h1>
-      {pending.some((p) => p.utr) && <AutoRefresh seconds={10} />}
+      {pending.some((p) => p.utr) && <AutoRefresh seconds={20} stopAfterMinutes={10} />}
 
       {sent && <div className="alert ok">Ticket sent to {sent.slice(0, 60)}. Their new QR is in their account.</div>}
       {fresh.length > 0 && (

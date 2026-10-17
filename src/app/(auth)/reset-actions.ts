@@ -4,16 +4,23 @@ import { redirect } from 'next/navigation';
 import { sql } from '@/lib/db';
 import { createSession, hashPassword, normalizeEmail, PORTAL } from '@/lib/auth';
 import { sendEmail } from '@/lib/mail';
+import { siteUrl } from '@/lib/env';
+import { reportError } from '@/lib/errors';
 import type { ActionState, Role } from '@/lib/types';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
-const site = () => process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 
 /** Always answers the same way, so nobody can use this form to find out who has an account. */
 export async function requestReset(_: ActionState, fd: FormData): Promise<ActionState> {
   const email = normalizeEmail(String(fd.get('email') ?? ''));
   const done: ActionState = { ok: true, message: 'If an account exists for that email, a reset link is on its way. It works for 1 hour.' };
   if (!/^\S+@\S+\.\S+$/.test(email)) return { error: 'Enter the email you signed up with.' };
+  let site: string;
+  try { site = siteUrl(); } catch (e) {
+    // Same answer for every email, so this can't reveal who has an account
+    await reportError(e, 'password reset');
+    return { error: 'Password reset emails aren’t switched on yet. Please contact support.' };
+  }
 
   const [u] = await sql<{ id: string; name: string }[]>`select id, name from users where email = ${email}`;
   if (!u) return done;
@@ -28,7 +35,7 @@ export async function requestReset(_: ActionState, fd: FormData): Promise<Action
     '',
     'Someone (hopefully you) asked to reset your THE FEST password. Open this link within 1 hour:',
     '',
-    `${site()}/reset-password?token=${token}`,
+    `${site}/reset-password?token=${token}`,
     '',
     'If you didn’t ask for this, ignore this email — your password stays the same.',
     '',

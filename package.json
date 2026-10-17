@@ -13,7 +13,7 @@
     "sign-ticket": "node scripts/sign-ticket.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "dependencies": {
     "@fontsource/bebas-neue": "^5.3.0",

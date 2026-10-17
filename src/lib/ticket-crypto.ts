@@ -13,7 +13,7 @@ import { createPrivateKey, createPublicKey, randomBytes, sign, verify, type KeyO
 const PREFIX = 'TF1';
 
 function pem(v: string | undefined, name: string) {
-  if (!v) throw new Error(`${name} is not set. Run "npm run keys" and add it to your env.`);
+  if (!v?.trim()) throw new Error(`${name} is not set. Open /setup/keys (or run "npm run keys") and add it to your env.`);
   return v.replace(/\\n/g, '\n');
 }
 
@@ -25,7 +25,28 @@ const publicKey = () =>
     ? createPublicKey(pem(process.env.TICKET_PUBLIC_KEY, 'TICKET_PUBLIC_KEY'))
     : createPublicKey(privateKey()));
 
-const uuidToB64 = (u: string) => Buffer.from(u.replace(/-/g, ''), 'hex').toString('base64url');
+/**
+ * Are the signing keys usable? Signs a fixed string and verifies it with the public key,
+ * so a public key from a different pair is caught before any ticket is sold.
+ */
+export function checkTicketKeys(): 'ok' | 'missing' | 'invalid' | 'public_invalid' | 'mismatch' {
+  const privRaw = (process.env.TICKET_PRIVATE_KEY ?? '').trim();
+  if (!privRaw) return 'missing';
+  let k: KeyObject, p: KeyObject;
+  try { k = createPrivateKey(privRaw.replace(/\\n/g, '\n')); } catch { return 'invalid'; }
+  if (k.asymmetricKeyType !== 'ec') return 'invalid';
+  const pubRaw = (process.env.TICKET_PUBLIC_KEY ?? '').trim();
+  try { p = pubRaw ? createPublicKey(pubRaw.replace(/\\n/g, '\n')) : createPublicKey(k); } catch { return 'public_invalid'; }
+  try {
+    const msg = Buffer.from('THE FEST key check');
+    const sig = sign('sha256', msg, { key: k, dsaEncoding: 'ieee-p1363' });
+    return verify('sha256', msg, { key: p, dsaEncoding: 'ieee-p1363' }, sig) ? 'ok' : 'mismatch';
+  } catch {
+    return 'mismatch';
+  }
+}
+
+const uuidToB64 =(u: string) => Buffer.from(u.replace(/-/g, ''), 'hex').toString('base64url');
 function b64ToUuid(b: string): string | null {
   const buf = Buffer.from(b, 'base64url');
   if (buf.length !== 16) return null;

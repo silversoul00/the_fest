@@ -4,11 +4,13 @@ import { requireAdmin } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { isUuid } from '@/lib/http';
 import { sendEmail } from '@/lib/mail';
+import { siteUrl } from '@/lib/env';
+import { afterResponse, reportError } from '@/lib/errors';
 import type { ActionState } from '@/lib/types';
 import { refundUnfulfilled, retryRefund } from '@/lib/refunds';
 
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
-const site = () => process.env.NEXT_PUBLIC_SITE_URL ?? '';
+const site = siteUrl;
 
 async function festFrom(fd: FormData) {
   const id = s(fd, 'festId');
@@ -24,7 +26,7 @@ export async function approveFest(fd: FormData) {
   const f = await festFrom(fd);
   if (f.status !== 'review') return;
   await sql`update fests set status = 'live', approved_at = now(), approved_by = ${admin.id}, review_note = null where id = ${f.id}`;
-  await sendEmail(f.email, `${f.name} is live on THE FEST 🎉`, `Your fest has been approved and tickets are on sale now.\n\nManage it: ${site()}/organizer/${f.id}\n\n— THE FEST`);
+  await afterResponse('fest approved email', () => sendEmail(f.email, `${f.name} is live on THE FEST 🎉`, `Your fest has been approved and tickets are on sale now.\n\nManage it: ${site()}/organizer/${f.id}\n\n— THE FEST`));
   revalidatePath('/admin', 'layout');
 }
 
@@ -34,7 +36,7 @@ export async function sendBackFest(_: ActionState, fd: FormData): Promise<Action
   const note = s(fd, 'note').slice(0, 300);
   if (note.length < 5) return { error: 'Tell the organizer what to fix.' };
   await sql`update fests set status = 'draft', review_note = ${note} where id = ${f.id}`;
-  await sendEmail(f.email, `${f.name}: changes needed before going live`, `THE FEST reviewed your fest and needs a change:\n\n${note}\n\nFix it and submit again: ${site()}/organizer/${f.id}\n\n— THE FEST`);
+  await afterResponse('fest sent back email', () => sendEmail(f.email, `${f.name}: changes needed before going live`, `THE FEST reviewed your fest and needs a change:\n\n${note}\n\nFix it and submit again: ${site()}/organizer/${f.id}\n\n— THE FEST`));
   revalidatePath('/admin', 'layout');
   return { ok: true, message: 'Sent back to the organizer.' };
 }
@@ -54,7 +56,7 @@ export async function retryRefundAction(fd: FormData) {
   await requireAdmin();
   const id = s(fd, 'orderId');
   if (!isUuid(id)) return;
-  try { await retryRefund(id); } catch (e) { console.error('retry refund failed', e); }
+  try { await retryRefund(id); } catch (e) { await reportError(e, 'admin retry refund'); }
   revalidatePath('/admin', 'layout');
 }
 
@@ -62,6 +64,6 @@ export async function refundUnfulfilledAction(fd: FormData) {
   await requireAdmin();
   const id = s(fd, 'orderId');
   if (!isUuid(id)) return;
-  try { await refundUnfulfilled(id); } catch (e) { console.error('refund failed', e); }
+  try { await refundUnfulfilled(id); } catch (e) { await reportError(e, 'admin refund'); }
   revalidatePath('/admin', 'layout');
 }

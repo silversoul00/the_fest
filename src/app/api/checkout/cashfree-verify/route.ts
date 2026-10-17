@@ -3,6 +3,7 @@ import { sql } from '@/lib/db';
 import { body, fail, isUuid, json, sameOrigin } from '@/lib/http';
 import { getCashfreePayment } from '@/lib/cashfree';
 import { confirmCashfree } from '@/lib/confirm';
+import { reportError } from '@/lib/errors';
 
 // Called by the checkout screen after the Cashfree popup closes.
 // We never trust the browser: we ask Cashfree whether the order is PAID.
@@ -20,7 +21,7 @@ export async function POST(req: Request) {
     const r = await confirmCashfree(b.orderId, p);
     return r.ok ? json({ paid: true }) : fail(r.error, 409);
   } catch (e) {
-    console.error('cashfree verify failed', e);
+    await reportError(e, 'cashfree verify');
     return fail('Couldn’t check the payment yet. If money was taken, your ticket appears within a few minutes.', 502);
   }
 }

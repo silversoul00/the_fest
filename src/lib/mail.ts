@@ -1,6 +1,8 @@
 import 'server-only';
 import { sql } from './db';
 import { rupees } from './format';
+import { siteUrl } from './env';
+import { reportError } from './errors';
 
 /*
  * Email via Resend (https://resend.com) — free for 3,000 emails/month.
@@ -8,9 +10,9 @@ import { rupees } from './format';
  * Without a key, emails are stored in email_outbox with status 'logged' so
  * nothing is lost and links can be read during development/testing.
  */
-const site = () => process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+const site = siteUrl;
 
-export async function sendEmail(to: string, subject: string, text: string) {
+export async function sendEmail(to: string, subject: string, text: string, opts: { reportFailures?: boolean } = {}) {
   const [row] = await sql<{ id: number }[]>`
     insert into email_outbox (to_email, subject, body_text) values (${to}, ${subject}, ${text}) returning id`;
   const key = process.env.RESEND_API_KEY;
@@ -22,7 +24,7 @@ export async function sendEmail(to: string, subject: string, text: string) {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: process.env.EMAIL_FROM ?? 'THE FEST <onboarding@resend.dev>', to: [to], subject, text }),
+      body: JSON.stringify({ from: process.env.EMAIL_FROM?.trim() || 'THE FEST <onboarding@resend.dev>', to: [to], subject, text }),
     });
     if (!r.ok) throw new Error(`Resend ${r.status}: ${(await r.text()).slice(0, 200)}`);
     // Once delivered, don't keep live one-time links (password reset, email confirm) in the database
@@ -30,7 +32,8 @@ export async function sendEmail(to: string, subject: string, text: string) {
     return { sent: true };
   } catch (e) {
     await sql`update email_outbox set status = 'failed', error = ${String(e).slice(0, 500)} where id = ${row.id}`;
-    console.error('email failed', e);
+    if (opts.reportFailures !== false) await reportError(e, 'email', { alert: true });
+    else console.error('email failed', e);
     return { sent: false };
   }
 }

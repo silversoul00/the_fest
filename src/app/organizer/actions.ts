@@ -10,6 +10,8 @@ import { OrderError } from '@/lib/orders';
 import { boothCode } from '@/lib/ticket-crypto';
 import { isUuid } from '@/lib/http';
 import { canManage } from '@/lib/queries';
+import { siteUrl } from '@/lib/env';
+import { afterResponse } from '@/lib/errors';
 import { sendEmail } from '@/lib/mail';
 import { matchCredits, confirmManually, rejectUpiOrder as rejectUpi, newInboundToken } from '@/lib/upi';
 import { parseAlerts, parseCsv, parseStatement, VPA_RE, type Credit } from '@/lib/upi-parse';
@@ -385,16 +387,15 @@ export async function addMember(_: ActionState, fd: FormData): Promise<ActionSta
                       on conflict (fest_id, email) do nothing returning id`;
   if (!r.length) return { error: 'That email is already a co-organizer.' };
   const [acct] = await sql<{ role: string }[]>`select role from users where email = ${email}`;
-  const site = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
-  await sendEmail(email, `You’re now a co-organizer of ${fest.name}`, [
+  await afterResponse('co-organizer email', () => sendEmail(email, `You’re now a co-organizer of ${fest.name}`, [
     `${user.name} added you as a co-organizer of ${fest.name} on THE FEST.`,
     '',
     acct?.role === 'organizer'
-      ? `Log in to manage it: ${site}/login?next=/organizer/${fest.id}`
-      : `Create an organizer account with this email to get access: ${site}/signup?role=organizer`,
+      ? `Log in to manage it: ${siteUrl()}/login?next=/organizer/${fest.id}`
+      : `Create an organizer account with this email to get access: ${siteUrl()}/signup?role=organizer`,
     '',
     '— THE FEST',
-  ].join('\n'));
+  ].join('\n')));
   refresh(fest.id);
   return {
     ok: true,

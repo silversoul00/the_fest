@@ -3,6 +3,8 @@ import { sql } from './db';
 import { ticketCode } from './ticket-crypto';
 import { sendEmail } from './mail';
 import { todayIST } from './format';
+import { siteUrl } from './env';
+import { afterResponse } from './errors';
 
 export class TransferError extends Error {}
 
@@ -39,14 +41,15 @@ export async function transferTicket(ticketId: string, fromUserId: string, toEma
     return { newId: n.id, to, from: { name: t.from_name, email: t.from_email }, festName: t.fest_name };
   });
 
-  const site = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
-  await sendEmail(toEmail, `${res.from.name} sent you a ticket to ${res.festName}`, [
-    `Hi ${res.to.name.split(' ')[0]},`, '',
-    `${res.from.name} transferred a ticket for ${res.festName} to you. It's in your account now:`, '',
-    `${site}/tickets/${res.newId}`, '', '— THE FEST',
-  ].join('\n')).catch(() => {});
-  await sendEmail(res.from.email, `Ticket to ${res.festName} transferred`, [
+  await afterResponse('transfer email', async () => {
+    await sendEmail(toEmail, `${res.from.name} sent you a ticket to ${res.festName}`, [
+      `Hi ${res.to.name.split(' ')[0]},`, '',
+      `${res.from.name} transferred a ticket for ${res.festName} to you. It's in your account now:`, '',
+      `${siteUrl()}/tickets/${res.newId}`, '', '— THE FEST',
+    ].join('\n'));
+  });
+  await afterResponse('transfer email', () => sendEmail(res.from.email, `Ticket to ${res.festName} transferred`, [
     `Your ticket for ${res.festName} now belongs to ${res.to.name} (${toEmail}). Your old QR code no longer works.`, '', '— THE FEST',
-  ].join('\n')).catch(() => {});
+  ].join('\n')));
   return res;
 }

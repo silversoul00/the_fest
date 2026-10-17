@@ -2,6 +2,7 @@ import { sql } from '@/lib/db';
 import { fail, isUuid, json } from '@/lib/http';
 import { getCashfreePayment, verifyCashfreeWebhook } from '@/lib/cashfree';
 import { confirmCashfree } from '@/lib/confirm';
+import { reportError } from '@/lib/errors';
 
 // Cashfree dashboard → Developers → Webhooks → https://thefest.in/api/webhooks/cashfree
 // Event: PAYMENT_SUCCESS_WEBHOOK. Backup for students who close the page before
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
     const r = await confirmCashfree(orderId, p);
     return json(r.ok ? { ok: true } : { ok: false, attention: r.error });
   } catch (e) {
-    console.error('cashfree webhook failed', e);
+    await reportError(e, 'cashfree webhook');
     return fail('Retry', 500);
   }
 }

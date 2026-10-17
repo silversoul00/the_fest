@@ -4,11 +4,12 @@ import { FestForm } from '../../FestForm';
 import { festFormFields } from '@/lib/fest-form';
 import { addMember, setAllowTransfers, cancelFestAction, removeMember, setFestStatus, updateFest } from '../../actions';
 import { ActionForm, Submit } from '@/components/forms';
+import { siteUrlOrNull } from '@/lib/env';
 
 export default async function Settings({ params }: { params: Promise<{ festId: string }> }) {
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
-  const site = process.env.NEXT_PUBLIC_SITE_URL ?? '';
+  const site = siteUrlOrNull() ?? '';
   const members = await getMembers(fest.id);
 
   const StatusBtn = ({ to, label, cls }: { to: string; label: string; cls: string }) => (

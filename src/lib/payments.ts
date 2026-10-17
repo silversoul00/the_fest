@@ -1,6 +1,7 @@
 import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FeeConfig } from './pricing';
+import { appEnv, cashfreeKeysSet, cashfreeLive, razorpayKeysSet, razorpayLive } from './env';
 
 /* ─── Commission settings (env) ───────────────────────────────────────
  * PLATFORM_FEE_MODE        flat | percent            (default flat)
@@ -29,18 +30,40 @@ export function feeConfig(): FeeConfig {
 
 /* ─── Which card/UPI gateway is live ──────────────────────────────────
  * PAYMENT_GATEWAY=cashfree|razorpay forces one; otherwise Cashfree is used
- * when its keys are set, then Razorpay, else clearly-labelled demo mode.
+ * when its keys are set, then Razorpay.
+ *
+ * Money can never be fake in production:
+ *  • In production only LIVE keys count (CASHFREE_ENV=production, rzp_live_…). Test keys there
+ *    mean "no gateway", so a sandbox payment can never issue a real ticket.
+ *  • 'demo' (pretend payment) only when no gateway is configured, DEMO_PAYMENTS=1, and not production.
+ *  • Otherwise 'none': card/UPI checkout is switched off; bank UPI and free tickets still work.
  */
-export const cashfreeEnabled = () => !!(process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY);
-export const razorpayEnabled = () => !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
+export type Gateway = 'cashfree' | 'razorpay' | 'demo' | 'none';
+export const cashfreeEnabled = () => cashfreeKeysSet() && (appEnv() !== 'production' || cashfreeLive());
+export const razorpayEnabled = () => razorpayKeysSet() && (appEnv() !== 'production' || razorpayLive());
 
-export function activeGateway(): 'cashfree' | 'razorpay' | 'demo' {
+export function activeGateway(): Gateway {
   const forced = process.env.PAYMENT_GATEWAY;
   if (forced === 'cashfree' && cashfreeEnabled()) return 'cashfree';
   if (forced === 'razorpay' && razorpayEnabled()) return 'razorpay';
   if (cashfreeEnabled()) return 'cashfree';
   if (razorpayEnabled()) return 'razorpay';
-  return 'demo';
+  const anyKeys = cashfreeKeysSet() || razorpayKeysSet();
+  if (!anyKeys && process.env.DEMO_PAYMENTS === '1' && appEnv() !== 'production') return 'demo';
+  return 'none';
+}
+
+/** May we trust a payment confirmation from this provider right now? (No sandbox confirmations in production.) */
+export function providerTrusted(provider: 'cashfree' | 'razorpay'): boolean {
+  return provider === 'cashfree' ? cashfreeEnabled() : razorpayEnabled();
+}
+
+/** Short label for the admin System card. */
+export function gatewayLabel(): string {
+  const g = activeGateway();
+  if (g === 'cashfree') return cashfreeLive() ? 'cashfree live' : 'cashfree test';
+  if (g === 'razorpay') return razorpayLive() ? 'razorpay live' : 'razorpay test';
+  return g;
 }
 
 /* ─── Razorpay ────────────────────────────────────────────────────── */

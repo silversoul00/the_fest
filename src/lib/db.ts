@@ -13,8 +13,12 @@ function get(): postgres.Sql {
   g.__tfSql = postgres(url, {
     ssl: local ? false : 'require', // Supabase requires TLS
     prepare: false, // required for Supabase's transaction pooler (port 6543)
+    // Serverless (Vercel Fluid compute): one instance serves many requests at once, so keep a small
+    // pool (not 1, which would queue them) and close idle connections after ~5 s so instances that
+    // go quiet hand their slots back to Supabase's pooler (200 clients on the free plan).
     max: process.env.NODE_ENV === 'production' ? 5 : 10,
-    idle_timeout: 20,
+    idle_timeout: process.env.NODE_ENV === 'production' ? 5 : 20,
+    max_lifetime: 60 * 10,
     connect_timeout: 10,
     onnotice: () => {},
     transform: { undefined: null },
