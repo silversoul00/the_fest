@@ -10,9 +10,9 @@ export async function listLiveFests(opts: { q?: string; category?: string } = {}
   const cat = opts.category && opts.category !== 'all' ? opts.category : null;
   return sql<FestListItem[]>`
     select f.*,
-      (select min(price_paise) from ticket_types t where t.fest_id = f.id and t.active)::int as min_price,
-      (select coalesce(sum(sold), 0) from ticket_types t where t.fest_id = f.id)::int as sold,
-      (select coalesce(sum(quota), 0) from ticket_types t where t.fest_id = f.id)::int as quota
+      (select min(price_paise) from ticket_types t where t.fest_id = f.id and t.active and t.kind = 'entry')::int as min_price,
+      (select coalesce(sum(sold), 0) from ticket_types t where t.fest_id = f.id and t.kind = 'entry')::int as sold,
+      (select coalesce(sum(quota), 0) from ticket_types t where t.fest_id = f.id and t.kind = 'entry')::int as quota
     from fests f
     where f.status = 'live' and f.ends_on >= (now() at time zone 'Asia/Kolkata')::date
       ${q ? sql`and (f.name ilike ${q} or f.college ilike ${q} or f.city ilike ${q})` : sql``}
@@ -47,8 +47,9 @@ export const getMembers = (festId: string) =>
     select m.id, m.email::text, m.created_at, u.name from fest_members m left join users u on u.email = m.email
     where m.fest_id = ${festId} order by m.created_at`;
 
-export const getTicketTypes = (festId: string) =>
-  sql<TicketType[]>`select * from ticket_types where fest_id = ${festId} order by sort, price_paise`;
+/** All ticket types (organizer), or only `kind` ones — the fest page sells 'entry', the ticket page 'addon'. */
+export const getTicketTypes = (festId: string, kind?: TicketType['kind']) =>
+  sql<TicketType[]>`select * from ticket_types where fest_id = ${festId} ${kind ? sql`and kind = ${kind}` : sql``} order by sort, price_paise`;
 
 export const getSchedule = (festId: string) =>
   sql<ScheduleEvent[]>`select * from schedule_events where fest_id = ${festId} order by starts_at`;
@@ -79,7 +80,7 @@ export async function festStats(festId: string) {
       (select coalesce(sum(qty), 0) from orders where fest_id = ${festId} and status = 'paid' and paid_at > now() - interval '24 hours')::int as sold_today,
       (select count(*) from scans where fest_id = ${festId} and result = 'admitted' and created_at > now() - interval '1 hour')::int as scans_hour,
       (select count(*) from scans where fest_id = ${festId} and result <> 'admitted')::int as blocked,
-      (select coalesce(sum(quota), 0) from ticket_types where fest_id = ${festId})::int as quota`;
+      (select coalesce(sum(quota), 0) from ticket_types where fest_id = ${festId} and kind = 'entry')::int as quota`;
   return s;
 }
 

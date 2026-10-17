@@ -29,7 +29,7 @@ export default async function Volunteers({ params }: { params: Promise<{ festId:
 
       <div className="card">
         <div className="h3 mb8">Add a volunteer</div>
-        <p className="xs muted mb16">They sign up (any role) with this email, then open <span className="mono">/scan</span> to scan tickets for your fest.</p>
+        <p className="xs muted mb16">They sign up (any role) with this email, then open <span className="mono">/scan</span> to scan tickets for your fest. Duty “Lunch counter” scans lunch only, “Stay desk” (or “Hostel…”) scans stay check-in/out only; anything else is the gate.</p>
         <ActionForm action={addStaff} resetOnSuccess>
           <input type="hidden" name="festId" value={fest.id} />
           <div className="form-row">
@@ -39,7 +39,7 @@ export default async function Volunteers({ params }: { params: Promise<{ festId:
           <div className="form-row">
             <label className="field"><span>Duty</span>
               <input className="input" name="duty" list="duties" defaultValue="Gate 1" />
-              <datalist id="duties"><option value="Gate 1" /><option value="Gate 2" /><option value="Gate 3" /><option value="Registration desk" /><option value="Main stage" /><option value="Hospitality" /></datalist>
+              <datalist id="duties"><option value="Gate 1" /><option value="Gate 2" /><option value="Gate 3" /><option value="Lunch counter" /><option value="Stay desk" /><option value="Registration desk" /><option value="Main stage" /><option value="Hospitality" /></datalist>
             </label>
             <label className="check" style={{ alignSelf: 'end', paddingBottom: 12 }}><input type="checkbox" name="can_scan" defaultChecked /> Can scan tickets</label>
           </div>

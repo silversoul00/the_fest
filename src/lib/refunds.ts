@@ -16,23 +16,25 @@ import { afterResponse, reportError } from './errors';
  */
 export async function refundOrder(orderId: string, opts: { festId: string; tickets?: number; reason: string; releaseSeats?: boolean }) {
   const res = await sql.begin(async (tx) => {
-    const [o] = await tx<{ id: string; qty: number; amount_paise: number; refunded_paise: number; platform_fee_paise: number; gateway_fee_paise: number; provider: string; status: string; ticket_type_id: string; payment_ref: string | null; razorpay_payment_id: string | null }[]>`
-      select id, qty, amount_paise, refunded_paise, platform_fee_paise, gateway_fee_paise, provider, status, ticket_type_id, payment_ref, razorpay_payment_id
+    const [o] = await tx<{ id: string; qty: number; amount_paise: number; refunded_paise: number; platform_fee_paise: number; gateway_fee_paise: number; provider: string; status: string; ticket_type_id: string; payment_ref: string | null; razorpay_payment_id: string | null; addon_for: string | null }[]>`
+      select id, qty, amount_paise, refunded_paise, platform_fee_paise, gateway_fee_paise, provider, status, ticket_type_id, payment_ref, razorpay_payment_id, addon_for
       from orders where id = ${orderId} and fest_id = ${opts.festId} for update`;
     if (!o) throw new OrderError('Order not found.');
     if (o.status !== 'paid') throw new OrderError('Only paid orders can be refunded.');
 
-    const unused = await tx<{ id: string }[]>`
+    // Add-on orders (lunch / stay) issue no tickets: the whole add-on is refunded as one unit, and its perks stop working.
+    const unused = o.addon_for ? [] : await tx<{ id: string }[]>`
       select id from tickets where order_id = ${orderId} and status = 'valid' order by issued_at for update`;
-    const k = Math.min(opts.tickets ?? unused.length, unused.length);
+    const k = o.addon_for ? 1 : Math.min(opts.tickets ?? unused.length, unused.length);
     if (k <= 0) throw new OrderError('All tickets in this order were already used or cancelled.');
 
     const share = (v: number) => Math.round((v * k) / o.qty);
     const amount = Math.min(share(o.amount_paise), o.amount_paise - o.refunded_paise);
     const ids = unused.slice(0, k).map((t) => t.id);
-    await tx`update tickets set status = 'void', void_reason = ${('Cancelled: ' + opts.reason).slice(0, 200)} where id in ${tx(ids)}`;
+    if (ids.length) await tx`update tickets set status = 'void', void_reason = ${('Cancelled: ' + opts.reason).slice(0, 200)} where id in ${tx(ids)}`;
 
-    const [{ left }] = await tx<{ left: number }[]>`select count(*)::int as left from tickets where order_id = ${orderId} and status in ('valid', 'used')`;
+    const [{ left }] = o.addon_for ? [{ left: 0 }]
+      : await tx<{ left: number }[]>`select count(*)::int as left from tickets where order_id = ${orderId} and status in ('valid', 'used')`;
     const refundStatus = o.provider === 'upi_direct' ? 'manual_pending' : o.provider === 'cashfree' || o.provider === 'razorpay' ? 'processing' : 'done';
     await tx`update orders set
         refunded_paise = refunded_paise + ${amount},

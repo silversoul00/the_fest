@@ -18,8 +18,9 @@ export async function POST(req: Request) {
   if (!user) return fail('Please log in to buy tickets.', 401);
   if (user.role !== 'student') return fail('Tickets are bought from a student account.', 403);
 
-  const b = await body<{ ticketTypeId?: string; qty?: number; method?: string; phone?: string }>(req);
+  const b = await body<{ ticketTypeId?: string; qty?: number; method?: string; phone?: string; ticketId?: string }>(req);
   if (!b || !isUuid(b.ticketTypeId)) return fail('Choose a ticket type.');
+  if (b.ticketId !== undefined && !isUuid(b.ticketId)) return fail('Pick one of your tickets.');
   const method = b.method === 'upi_direct' ? 'upi_direct' : 'gateway';
 
   // Cashfree requires a phone number; collect it once and keep it on the profile
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const o = await createOrder({ userId: user.id, ticketTypeId: b.ticketTypeId, qty: Number(b.qty ?? 1), method });
+    const o = await createOrder({ userId: user.id, ticketTypeId: b.ticketTypeId, qty: Number(b.qty ?? 1), method, ticketId: b.ticketId });
 
     if (o.free) {
       await fulfilOrder(o.orderId, { provider: 'free' });

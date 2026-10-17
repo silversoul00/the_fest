@@ -126,15 +126,26 @@ const TicketSchema = z.object({
   quota: z.coerce.number().int('Quantity must be a whole number').min(1, 'Quantity must be at least 1').max(100000),
 });
 
+/** Lunch days, stay and add-on from the ticket-type form. Lunch days must fall within the fest's dates. */
+function perksFrom(fd: FormData, fest: { starts_on: string; ends_on: string }) {
+  const days = [...new Set(fd.getAll('lunch_days').map(String))].filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+  if (days.some((d) => d < fest.starts_on || d > fest.ends_on)) return { error: 'Lunch days must be during the fest.' } as const;
+  return { days: `{${days.join(',')}}`, stay: fd.get('includes_stay') === 'on', kind: fd.get('addon') === 'on' ? 'addon' : 'entry' } as const;
+}
+
 export async function addTicketType(_: ActionState, fd: FormData): Promise<ActionState> {
   const { fest } = await ownFest(fd);
   const p = TicketSchema.safeParse(Object.fromEntries(fd));
   if (!p.success) return first(p.error);
   const price = rupeesToPaise(p.data.price);
   if (price > 10_000_00) return { error: 'Max ticket price is ₹10,000' };
-  await sql`insert into ticket_types (fest_id, name, description, price_paise, quota, sort)
+  const perks = perksFrom(fd, fest);
+  if ('error' in perks) return { error: perks.error };
+  if (perks.kind === 'addon' && perks.days === '{}' && !perks.stay) return { error: 'An add-on needs lunch days or stay.' };
+  await sql`insert into ticket_types (fest_id, name, description, price_paise, quota, sort, kind, lunch_days, includes_stay)
             values (${fest.id}, ${p.data.name}, ${p.data.description ?? ''}, ${price}, ${p.data.quota},
-                    (select coalesce(max(sort), 0) + 1 from ticket_types where fest_id = ${fest.id}))`;
+                    (select coalesce(max(sort), 0) + 1 from ticket_types where fest_id = ${fest.id}),
+                    ${perks.kind}, ${perks.days}::date[], ${perks.stay})`;
   refresh(fest.id);
   return { ok: true, message: 'Ticket type added.' };
 }
@@ -144,12 +155,20 @@ export async function updateTicketType(_: ActionState, fd: FormData): Promise<Ac
   const p = TicketSchema.safeParse(Object.fromEntries(fd));
   if (!p.success) return first(p.error);
   const id = s(fd, 'id');
-  const [t] = await sql<{ sold: number }[]>`select sold from ticket_types where id = ${id} and fest_id = ${fest.id}`;
+  const [t] = await sql<{ sold: number; kind: string; orders: number }[]>`
+    select sold, kind, (select count(*) from orders o where o.ticket_type_id = tt.id)::int as orders
+    from ticket_types tt where id = ${id} and fest_id = ${fest.id}`;
   if (!t) return { error: 'Ticket type not found' };
   if (p.data.quota < t.sold) return { error: `Already ${t.sold} sold — quantity can't go below that.` };
+  const perks = perksFrom(fd, fest);
+  if ('error' in perks) return { error: perks.error };
+  // Entry ↔ add-on can't flip once anyone has ordered it (tickets vs. no tickets)
+  if (perks.kind !== t.kind && t.orders > 0) return { error: 'People have already ordered this — it can’t switch between ticket and add-on.' };
+  if (perks.kind === 'addon' && perks.days === '{}' && !perks.stay) return { error: 'An add-on needs lunch days or stay.' };
   const price = rupeesToPaise(p.data.price);
   await sql`update ticket_types set name = ${p.data.name}, description = ${p.data.description ?? ''},
-              price_paise = ${price}, quota = ${p.data.quota} where id = ${id}`;
+              price_paise = ${price}, quota = ${p.data.quota},
+              kind = ${perks.kind}, lunch_days = ${perks.days}::date[], includes_stay = ${perks.stay} where id = ${id}`;
   refresh(fest.id);
   return { ok: true, message: 'Updated.' };
 }

@@ -14,13 +14,15 @@ export default async function Sales({ params, searchParams }: { params: Promise<
 
   const [byType, orders, toSend] = await Promise.all([
     sql<{ name: string; qty: number; gross: number; fees: number }[]>`
-      select tt.name, (select count(*) from tickets t where t.ticket_type_id = tt.id and t.status <> 'void')::int qty,
+      select tt.name, (case when tt.kind = 'addon' then (select count(*) from orders a where a.ticket_type_id = tt.id and a.status = 'paid')
+                            else (select count(*) from tickets t where t.ticket_type_id = tt.id and t.status <> 'void') end)::int qty,
              coalesce(sum(o.amount_paise - o.refunded_paise), 0)::int gross, coalesce(sum(o.platform_fee_paise + o.gateway_fee_paise), 0)::int fees
       from ticket_types tt left join orders o on o.ticket_type_id = tt.id and o.status in ('paid', 'refunded')
       where tt.fest_id = ${fest.id} group by tt.id, tt.name, tt.sort order by tt.sort`,
     sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string }[]>`
       select o.id, o.paid_at as created_at, o.qty, o.amount_paise, o.platform_fee_paise, o.provider, o.status, o.refunded_paise, o.refund_status, o.utr,
-             (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int as unused,
+             case when o.addon_for is not null then (o.status = 'paid')::int
+                  else (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int end as unused,
              u.name, u.email::text, u.college, tt.name as type
       from orders o join users u on u.id = o.user_id join ticket_types tt on tt.id = o.ticket_type_id
       where o.fest_id = ${fest.id} and o.status in ('paid', 'refunded')

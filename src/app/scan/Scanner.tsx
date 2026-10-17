@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
 
 type Counts = { inn: number; total: number; mine: number };
+type Counter = 'gate' | 'lunch' | 'stay';
 type Verdict = {
   result: 'admitted' | 'duplicate' | 'invalid' | 'wrong_fest' | 'void';
   message: string; holder?: string; type?: string; code?: string; checkedInAt?: string; gate?: string | null;
@@ -11,9 +12,12 @@ type Verdict = {
 };
 type FeedItem = Verdict & { at: number };
 
-const TITLE: Record<Verdict['result'], string> = {
-  admitted: '✓ Admit', duplicate: '⚠ Already in', invalid: '✕ Invalid', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled',
+const TITLE: Record<Counter, Record<Verdict['result'], string>> = {
+  gate: { admitted: '✓ Admit', duplicate: '⚠ Already in', invalid: '✕ Invalid', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled' },
+  lunch: { admitted: '✓ Lunch', duplicate: '⚠ Already had lunch', invalid: '✕ No lunch', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled' },
+  stay: { admitted: '✓ Stay', duplicate: '⚠ Stay done', invalid: '✕ No stay', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled' },
 };
+const COUNTER_LABEL: Record<Counter, string> = { gate: 'Gate', lunch: 'Lunch counter', stay: 'Stay desk' };
 
 declare class BarcodeDetector {
   constructor(o: { formats: string[] });
@@ -33,7 +37,8 @@ function feedback(ok: boolean) {
   } catch {}
 }
 
-export function Scanner({ fests, festId, festName, defaultGate, volunteer, initialCounts, lockAction }: {
+export function Scanner({ counter, canPick, fests, festId, festName, defaultGate, volunteer, initialCounts, lockAction }: {
+  counter: Counter; canPick: boolean;
   fests: { id: string; name: string; duty: string | null }[]; festId: string; festName: string; defaultGate: string;
   volunteer: string; initialCounts: Counts; lockAction: () => Promise<void>;
 }) {
@@ -60,7 +65,7 @@ export function Scanner({ fests, festId, festName, defaultGate, volunteer, initi
     if (busy.current) return;
     busy.current = true;
     try {
-      const r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId, gate, ...data }) });
+      const r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId, gate, counter, ...data }) });
       if (r.status === 401) { router.replace('/scan/login'); return; }
       const v: Verdict = await r.json();
       if (!r.ok) { setVerdict({ result: 'invalid', message: v.error ?? 'Scan failed' }); feedback(false); return; }
@@ -75,7 +80,7 @@ export function Scanner({ fests, festId, festName, defaultGate, volunteer, initi
       // Hold the verdict on screen so the volunteer can read it
       setTimeout(() => { busy.current = false; }, 1400);
     }
-  }, [festId, gate, router]);
+  }, [festId, gate, counter, router]);
 
   // Camera loop
   useEffect(() => {
@@ -112,7 +117,8 @@ export function Scanner({ fests, festId, festName, defaultGate, volunteer, initi
         }
         if (value) {
           const now = Date.now();
-          if (value === last.current.v && now - last.current.t < 4000) return; // same ticket still in frame
+          // Same ticket still in frame. Lunch/stay desks wait longer so a held-up QR isn't used twice (stay: in, then out).
+          if (value === last.current.v && now - last.current.t < (counter === 'gate' ? 4000 : 60000)) return;
           last.current = { v: value, t: now };
           submit({ payload: value });
         }
@@ -121,7 +127,7 @@ export function Scanner({ fests, festId, festName, defaultGate, volunteer, initi
     })();
 
     return () => { stopped = true; cancelAnimationFrame(raf); stream?.getTracks().forEach((t) => t.stop()); };
-  }, [camera, submit]);
+  }, [camera, submit, counter]);
 
   function startCamera() {
     if (!navigator.mediaDevices?.getUserMedia) { setCamera('unsupported'); return; }
@@ -134,7 +140,7 @@ export function Scanner({ fests, festId, festName, defaultGate, volunteer, initi
     <div className="scan-shell" style={{ ['--accent' as string]: 'var(--green)' }}>
       <header className="topbar">
         <div className="wrap topbar-in">
-          <span className="logo" style={{ fontSize: 20, color: 'var(--green)' }}>GATE SCANNER</span>
+          <span className="logo" style={{ fontSize: 20, color: 'var(--green)' }}>{counter === 'gate' ? 'GATE SCANNER' : COUNTER_LABEL[counter].toUpperCase()}</span>
           <form action={lockAction}><button className="btn sm outline" type="submit">🔒 Lock</button></form>
         </div>
       </header>
@@ -148,17 +154,34 @@ export function Scanner({ fests, festId, festName, defaultGate, volunteer, initi
               {fests.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>
           ) : <div className="grow display" style={{ fontSize: 24 }}>{festName}</div>}
-          <select className="select" style={{ width: 130 }} value={gate} onChange={(e) => setGate(e.target.value)} aria-label="Gate">
+          {counter === 'gate' && <select className="select" style={{ width: 130 }} value={gate} onChange={(e) => setGate(e.target.value)} aria-label="Gate">
             {['Gate 1', 'Gate 2', 'Gate 3', 'Gate 4', 'VIP Gate'].concat(gate && !gate.startsWith('Gate') && gate !== 'VIP Gate' ? [gate] : []).map((g) => <option key={g}>{g}</option>)}
-          </select>
+          </select>}
         </div>
 
+        <div className="row g8" style={{ alignItems: 'center' }}>
+          <div className="grow display" style={{ fontSize: 30, color: counter === 'gate' ? 'var(--green)' : 'var(--yellow)' }} data-counter={counter}>{COUNTER_LABEL[counter]}</div>
+          {canPick && (
+            <select className="select" style={{ width: 150 }} value={counter} aria-label="Counter"
+              onChange={(e) => router.replace(`/scan?fest=${festId}&counter=${e.target.value}`)}>
+              {(['gate', 'lunch', 'stay'] as const).map((c) => <option key={c} value={c}>{COUNTER_LABEL[c]}</option>)}
+            </select>
+          )}
+        </div>
+
+        {counter !== 'gate' ? (
+          <div className="grid-2" style={{ gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
+            <div className="stat" style={{ ['--stat' as string]: 'var(--yellow)', padding: 12 }}><div className="label">{counter === 'lunch' ? 'Lunches today' : 'Stay scans today'}</div><div className="v" style={{ fontSize: 30 }}>{counts.inn}</div></div>
+            <div className="stat" style={{ ['--stat' as string]: 'var(--blue)', padding: 12 }}><div className="label">By you</div><div className="v" style={{ fontSize: 30 }}>{counts.mine}</div></div>
+          </div>
+        ) : <>
         <div className="grid-2" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
           <div className="stat" style={{ ['--stat' as string]: 'var(--green)', padding: 12 }}><div className="label">Inside</div><div className="v" style={{ fontSize: 30 }}>{counts.inn}</div></div>
           <div className="stat" style={{ ['--stat' as string]: 'var(--yellow)', padding: 12 }}><div className="label">Tickets</div><div className="v" style={{ fontSize: 30 }}>{counts.total}</div></div>
           <div className="stat" style={{ ['--stat' as string]: 'var(--blue)', padding: 12 }}><div className="label">By you</div><div className="v" style={{ fontSize: 30 }}>{counts.mine}</div></div>
         </div>
         <div className="bar"><i style={{ width: `${pct}%`, background: 'var(--green)' }} /></div>
+        </>}
 
         <div className="viewfinder">
           {camera === 'on' ? (
@@ -179,7 +202,7 @@ export function Scanner({ fests, festId, festName, defaultGate, volunteer, initi
 
         {verdict && (
           <div className={`verdict ${verdict.result}`} role="status" aria-live="assertive" onClick={() => setVerdict(null)}>
-            <div className="big">{TITLE[verdict.result]}</div>
+            <div className="big">{TITLE[counter][verdict.result]}</div>
             {verdict.holder && <div className="mt8" style={{ color: 'var(--white)', fontSize: 18 }}>{verdict.holder}</div>}
             <div className="small mt8">
               {verdict.type ? `${verdict.type} · ` : ''}{verdict.message}
@@ -197,7 +220,7 @@ export function Scanner({ fests, festId, festName, defaultGate, volunteer, initi
           <div className="list">
             {feed.map((f) => (
               <div key={f.at} className="li" style={{ padding: '10px 14px' }}>
-                <span className={`badge ${f.result === 'admitted' ? 'green' : f.result === 'duplicate' ? 'orange' : 'red'}`}>{f.result === 'admitted' ? 'IN' : f.result === 'duplicate' ? 'DUP' : 'NO'}</span>
+                <span className={`badge ${f.result === 'admitted' ? 'green' : f.result === 'duplicate' ? 'orange' : 'red'}`}>{f.result === 'admitted' ? (counter === 'gate' ? 'IN' : 'OK') : f.result === 'duplicate' ? 'DUP' : 'NO'}</span>
                 <span className="grow truncate small">{f.holder ?? f.message}</span>
                 <span className="xs muted mono">{new Date(f.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</span>
               </div>

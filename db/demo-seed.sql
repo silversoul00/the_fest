@@ -23,6 +23,8 @@ begin
   insert into users (email, password_hash, name, role, email_verified_at) values ('sponsor@thefest.in', pw, 'Neha Brand Manager', 'sponsor', now());
   insert into users (email, password_hash, name, role, college, email_verified_at) values ('volunteer@thefest.in', pw, 'Kiran Volunteer', 'student', colleges[1], now()) returning id into vol;
   insert into users (email, password_hash, name, role, is_admin, email_verified_at) values ('admin@thefest.in', pw, 'THE FEST Admin', 'organizer', true, now()) returning id into adm;
+  insert into users (email, password_hash, name, role, college, email_verified_at) values
+    ('lunch@seed.thefest.in', pw, 'Lata Lunch', 'student', colleges[1], now()), ('stay@seed.thefest.in', pw, 'Sunil Stay', 'student', colleges[1], now());
 
   -- 120 attendees
   insert into users (email, password_hash, name, role, college, email_verified_at)
@@ -58,7 +60,7 @@ begin
 
   insert into ticket_types (fest_id, name, description, price_paise, quota, sort) values
     (f_neon, 'Day Pass', 'Entry for one day, all open events', 29900, 1200, 0),
-    (f_neon, '3-Day Pass', 'All three days + pro night standing', 69900, 900, 1),
+    (f_neon, '3-Day Pass', 'All three days + pro night standing, lunch on days 2–3 and hostel stay', 69900, 900, 1),
     (f_neon, 'VIP Pro Night', 'Front pit for the headline act', 149900, 150, 2),
     (f_hack, 'Hacker (team member)', 'One seat in a team of up to 4', 0, 400, 0),
     (f_hack, 'Workshop Pass', 'All workshops, no hacking', 19900, 200, 1),
@@ -67,6 +69,10 @@ begin
     (f_comm, 'Delegate', 'All events + lunch', 49900, 800, 0),
     (f_beats, 'Entry', 'Both days', 19900, 1000, 0),
     (f_goal, 'Spectator', 'All matches', 9900, 900, 0);
+  -- Lunch / stay (scanner counters): the 3-Day Pass includes lunch on days 2–3 and stay; lunch is also sold as an add-on
+  update ticket_types set lunch_days = array[d0, d0 + 1], includes_stay = true where fest_id = f_neon and name = '3-Day Pass';
+  insert into ticket_types (fest_id, name, description, price_paise, quota, sort, kind, lunch_days)
+  values (f_neon, 'Lunch add-on', 'Lunch on days 2–3', 9900, 500, 3, 'addon', array[d0, d0 + 1]);
 
   -- Sales: one order per (attendee, fest), spread over past days. Fee ₹15 per paid ticket.
   create temp table plan (n int, buyer uuid, fest uuid, sort int, qty int, days_ago numeric) on commit drop;
@@ -103,6 +109,8 @@ begin
     (f_neon, 'gate3@seed.thefest.in', 'Priya Gate', 'Gate 3', true, now() - interval '4 hours'),
     (f_neon, 'desk@seed.thefest.in', 'Lakshmi Desk', 'Registration desk', false, null),
     (f_neon, 'stage@seed.thefest.in', 'Rahul Stage', 'Main stage', false, null),
+    (f_neon, 'lunch@seed.thefest.in', 'Lata Lunch', 'Lunch counter', true, null),
+    (f_neon, 'stay@seed.thefest.in', 'Sunil Stay', 'Stay desk', true, null),
     (f_hack, 'volunteer@thefest.in', 'Kiran Volunteer', 'Gate 1', true, null);
 
   -- Check-ins: ~62% of Neon Utsav tickets today 9 AM–6 PM IST; most Goal Rush tickets

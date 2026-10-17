@@ -26,7 +26,7 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
     || (user.verified && (await sql`select 1 from fest_members where fest_id = ${fest.id} and email = ${user.email}`).length > 0));
   if (!fest || ((fest.status === 'draft' || fest.status === 'review') && !runsIt && !user?.is_admin)) notFound();
 
-  const [types, schedule, news] = await Promise.all([getTicketTypes(fest.id), getSchedule(fest.id), getAnnouncements(fest.id, 5)]);
+  const [types, schedule, news] = await Promise.all([getTicketTypes(fest.id, 'entry'), getSchedule(fest.id), getAnnouncements(fest.id, 5)]);
 
   // Group schedule by IST day
   const days = new Map<string, ScheduleEvent[]>();

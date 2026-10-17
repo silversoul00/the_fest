@@ -1,7 +1,9 @@
 # End-to-end test of every portal. Run via tests/run-e2e.sh (needs a running server on seeded data).
 import asyncio, re, json
 from playwright.async_api import async_playwright
-import os
+import os, subprocess
+DB = os.environ.get('E2E_PSQL', 'psql -h /tmp -U postgres thefest')
+def q(sql): return subprocess.run(DB + ' -qtAc "' + sql + '"', shell=True, capture_output=True, text=True).stdout.strip()
 S = os.environ.get('E2E_DIR', '/tmp/thefest-e2e') + '/'
 B = os.environ.get('E2E_BASE', 'http://localhost:3000')
 TID, FID, CODE = open(S + 'student_ticket.txt').read().split()
@@ -44,6 +46,15 @@ async def main():
         await f.locator('button[type=submit]').click(); await org.wait_for_selector('text=Ticket type added.')
         await org.wait_for_selector('strong:has-text("Early Bird")', timeout=10000)
         check('add ticket type', await org.locator('strong:has-text("Early Bird")').count() == 1)
+        # lunch / stay / add-on settings on a ticket type
+        await f.locator('input[name=name]').fill('Hostel add-on'); await f.locator('input[name=price]').fill('150'); await f.locator('input[name=quota]').fill('40')
+        await f.locator('input[name=addon]').check(); await f.locator('input[name=includes_stay]').check()
+        await f.locator('input[name=lunch_days]').nth(1).check()
+        await f.locator('button[type=submit]').click(); await org.wait_for_selector('strong:has-text("Hostel add-on")', timeout=10000)
+        card = org.locator('.card', has=org.locator('strong:has-text("Hostel add-on")'))
+        row = q("select kind || ' ' || includes_stay || ' ' || cardinality(lunch_days) from ticket_types where name='Hostel add-on'")
+        check('COUNTERS organizer sets add-on + stay + lunch day on a ticket type', row == 'addon true 1' and await card.locator('.badge:has-text("Add-on")').count() == 1, row)
+        await f.locator('input[name=addon]').uncheck(); await f.locator('input[name=includes_stay]').uncheck(); await f.locator('input[name=lunch_days]').nth(1).uncheck()
         # bad input
         await f.locator('input[name=name]').fill('X'); await f.locator('input[name=price]').fill('10'); await f.locator('input[name=quota]').fill('5')
         await f.locator('button[type=submit]').click(); await org.wait_for_selector('.alert.error')
@@ -179,6 +190,86 @@ async def main():
         await st.goto(f'{B}/tickets/{TID}')
         check('student ticket shows ADMITTED', await st.locator('.stamp').count() == 1)
         await st.screenshot(path=S + 's_ticket_used.png', full_page=True)
+
+        # ── LUNCH / STAY COUNTERS (one QR, counter comes from the volunteer's duty) ──
+        lc = await browser.new_context(**mobile); lun = await lc.new_page(); watch(lun, errs)
+        await login(lun, 'lunch@seed.thefest.in', url='/scan/login')
+        check('COUNTERS "Lunch counter" volunteer opens scanner on lunch', await lun.locator('[data-counter=lunch]').count() == 1, lun.url)
+        await lun.screenshot(path=S + 'scan_lunch.png', full_page=True)
+        def scan_js(code, extra=''):
+            return ("fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({festId:'%s',code:'%s'%s})}).then(r=>r.json())" % (FID, code, extra))
+        # a fresh 3-Day Pass (lunch today + stay) that hasn't been through the gate
+        pass3 = q(f"select t.code from tickets t join ticket_types tt on tt.id=t.ticket_type_id where t.fest_id='{FID}' and tt.name='3-Day Pass' and t.status='valid' order by t.code limit 1")
+        scans_before = q(f"select count(*) from scans where fest_id='{FID}'")
+        await lun.fill('input[aria-label="Ticket code"]', pass3); await lun.click('button:has-text("Check")'); await lun.wait_for_timeout(900)
+        v = await lun.text_content('.verdict')
+        check('COUNTERS lunch scan of entitled ticket -> Lunch (day 1 of 2)', '✓ Lunch' in v and 'day 1 of 2' in v, v.strip()[:80])
+        await lun.wait_for_timeout(1500)
+        j = await lun.evaluate(scan_js(pass3))
+        check('COUNTERS second lunch scan same day -> "already taken"', j.get('result') == 'duplicate' and 'already taken' in j.get('message', ''), j.get('message'))
+        st_after = q(f"select status from tickets where code='{pass3}'"); scans_after = q(f"select count(*) from scans where fest_id='{FID}'")
+        check('COUNTERS lunch scans leave gate status and gate scan log unchanged', st_after == 'valid' and scans_before == scans_after, (st_after, scans_before, scans_after))
+        daypass = q(f"select t.code from tickets t join ticket_types tt on tt.id=t.ticket_type_id where t.fest_id='{FID}' and tt.name='Day Pass' and t.status<>'void' order by t.code limit 1")
+        j = await lun.evaluate(scan_js(daypass))
+        check('COUNTERS ticket without lunch refused', j.get('result') == 'invalid' and 'No lunch' in j.get('message', ''), j.get('message'))
+        pass3b = q(f"select t.code from tickets t join ticket_types tt on tt.id=t.ticket_type_id where t.fest_id='{FID}' and tt.name='3-Day Pass' and t.status='valid' order by t.code offset 1 limit 1")
+        j = await lun.evaluate(scan_js(pass3b, ",counter:'gate',gate:'Gate 1'"))
+        check('COUNTERS lunch volunteer sending counter:gate still redeems lunch, never admits', j.get('counter') == 'lunch' and j.get('result') == 'admitted' and q(f"select status from tickets where code='{pass3b}'") == 'valid', j)
+
+        yc = await browser.new_context(**mobile); stay = await yc.new_page(); watch(stay, errs)
+        await login(stay, 'stay@seed.thefest.in', url='/scan/login')
+        check('COUNTERS "Stay desk" volunteer opens scanner on stay', await stay.locator('[data-counter=stay]').count() == 1)
+        j1 = await stay.evaluate(scan_js(pass3))
+        await stay.wait_for_timeout(11000)   # a QR held in front of the camera can't check out within 10 s
+        await stay.fill('input[aria-label="Ticket code"]', pass3); await stay.click('button:has-text("Check")'); await stay.wait_for_timeout(900)
+        v2 = await stay.text_content('.verdict')
+        await stay.wait_for_timeout(1500)
+        j3 = await stay.evaluate(scan_js(pass3))
+        check('COUNTERS stay: 1st scan check-in, 2nd check-out, 3rd "already checked out"',
+              'checked in' in j1.get('message', '') and 'checked out' in v2 and j3.get('result') == 'duplicate' and 'Already checked out' in j3.get('message', ''), (j1.get('message'), v2.strip()[:60], j3.get('message')))
+        j = await stay.evaluate(scan_js(daypass))
+        check('COUNTERS ticket without stay refused at stay desk', j.get('result') == 'invalid' and 'No stay' in j.get('message', ''), j.get('message'))
+
+        # organizer (no duty) picks the counter; volunteers can't
+        oc2 = await browser.new_context(**mobile); osc = await oc2.new_page()
+        await login(osc, 'organizer@thefest.in', url='/scan/login')
+        await osc.goto(f'{B}/scan?fest={FID}&counter=stay')
+        check('COUNTERS organizer can pick a counter', await osc.locator('[data-counter=stay]').count() == 1 and await osc.locator('select[aria-label=Counter]').count() == 1)
+        check('COUNTERS volunteer gets no counter picker', await lun.locator('select[aria-label=Counter]').count() == 0)
+
+        # add-on: a Day Pass holder buys the Lunch add-on from the ticket page (demo checkout)
+        buyer_email, buyer_tid, buyer_code = q(f"select u.email, t.id, t.code from tickets t join ticket_types tt on tt.id=t.ticket_type_id join users u on u.id=t.user_id join orders o on o.id=t.order_id where t.fest_id='{FID}' and tt.name='Day Pass' and t.status<>'void' and o.qty=1 and u.email not like 'attendee10_@%' order by u.email limit 1").split('|')
+        tickets_before = q(f"select count(*) from tickets where fest_id='{FID}'")
+        entry_sold_before = q(f"select sum(sold) from ticket_types where fest_id='{FID}' and kind='entry'")
+        bc = await browser.new_context(**mobile); bu = await bc.new_page(); watch(bu, errs)
+        await login(bu, buyer_email)
+        await bu.goto(f'{B}/tickets/{buyer_tid}')
+        await bu.locator('#addons button:has-text("Pay ₹")').click(); await bu.wait_for_selector('text=DEMO PAYMENT')
+        await bu.click('text=(demo)'); await bu.wait_for_url('**/tickets/*?addon=1'); await bu.wait_for_load_state('networkidle')
+        await bu.wait_for_selector('text=Lunch ·', timeout=10000)
+        await bu.screenshot(path=S + 's_ticket_addon.png', full_page=True)
+        check('COUNTERS student buys lunch add-on: ticket page now lists 2 lunch days', await bu.locator('text=Lunch ·').count() == 2, bu.url)
+        check('COUNTERS add-on issues no new ticket and takes no seat',
+              q(f"select count(*) from tickets where fest_id='{FID}'") == tickets_before and q(f"select sum(sold) from ticket_types where fest_id='{FID}' and kind='entry'") == entry_sold_before)
+        j = await lun.evaluate(scan_js(buyer_code))
+        check('COUNTERS lunch scan works after buying the add-on', j.get('result') == 'admitted', j.get('message'))
+        lunch_tt = q("select id from ticket_types where name='Lunch add-on'")
+        r = await bu.evaluate("fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticketTypeId:'%s',ticketId:'%s'})}).then(r=>r.json())" % (lunch_tt, buyer_tid))
+        check("COUNTERS same add-on can't be bought twice for one ticket", 'already has' in (r.get('error') or ''), r)
+        r = await bu.evaluate("fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticketTypeId:'%s',ticketId:'%s'})}).then(r=>r.json())" % (lunch_tt, TID))
+        check("COUNTERS add-on can't be attached to someone else's ticket", 'Pick one of your' in (r.get('error') or ''), r)
+        page = await st.evaluate("fetch('/fests/neon-utsav').then(r=>r.text())")
+        check('COUNTERS fest page does not sell add-ons as tickets', 'Lunch add-on' not in page and 'Hostel add-on' not in page)
+        # organizer refunds the add-on -> lunch refused, entry ticket untouched
+        await org.goto(f'{B}/organizer/{neon}/sales?q={buyer_email}')
+        row = org.locator('tr', has_text=buyer_email).filter(has_text='Lunch add-on').first
+        await row.locator('summary').click(); await row.locator('input[name=reason]').fill('Changed mind')
+        await row.locator('button:has-text("Cancel & refund")').click()
+        await org.locator('tr', has_text=buyer_email).filter(has_text='Lunch add-on').locator('.badge:has-text("Refunded")').wait_for(timeout=15000)
+        q(f"delete from perk_redemptions where ticket_id='{buyer_tid}'")
+        j = await lun.evaluate(scan_js(buyer_code))
+        bst = q(f"select status from tickets where id='{buyer_tid}'")
+        check('COUNTERS after refunding the add-on, lunch is refused; entry ticket still valid', j.get('result') == 'invalid' and bst != 'void', (j.get('message'), bst))
 
         # ── SPONSOR ────────────────────────────────────────────
         pc = await browser.new_context(**mobile); sp = await pc.new_page(); watch(sp, errs)

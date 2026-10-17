@@ -25,7 +25,7 @@ Both paths end the same way: the new app runs as a **Preview** first, the old pr
 
 Your production database is the Supabase project **thefest** (ref `uxhpvbgxftsdpcyycxpq`, Mumbai). Its main tables are set up; the Oct 17 update below is **not applied yet**.
 
-**2a. Apply the small update from Oct 17, 2026** (adds three tables: login protection, error log, alert timer — nothing existing changes). **Do this before the new app uses this database.** Until it's done, `/api/health` answers 503 with `database setup incomplete: login_attempts, app_errors, app_alert_state`.
+**2a. Apply the small update from Oct 17, 2026** (adds four tables — login protection, error log, alert timer, lunch/stay scans — and lunch/stay/add-on settings on ticket types; nothing existing changes). **Do this before the new app uses this database.** Until it's done, `/api/health` answers 503 with `database setup incomplete: login_attempts, app_errors, app_alert_state, perk_redemptions, …`.
 1. Open `https://supabase.com/dashboard/project/uxhpvbgxftsdpcyycxpq` → **SQL Editor** (left bar) → **New query**.
 2. Paste this and tap **Run**. It is safe to run twice.
 
@@ -42,6 +42,18 @@ create table if not exists app_alert_state (
 alter table login_attempts  enable row level security;
 alter table app_errors      enable row level security;
 alter table app_alert_state enable row level security;
+-- Scanner counters (lunch / stay perks and add-ons)
+alter table ticket_types add column if not exists kind text not null default 'entry' check (kind in ('entry', 'addon'));
+alter table ticket_types add column if not exists lunch_days date[] not null default '{}';
+alter table ticket_types add column if not exists includes_stay boolean not null default false;
+alter table orders add column if not exists addon_for uuid references tickets(id) on delete set null;
+create index if not exists orders_addon_for_idx on orders(addon_for) where addon_for is not null;
+create table if not exists perk_redemptions (
+  id bigserial primary key, fest_id uuid not null references fests(id) on delete cascade,
+  ticket_id uuid not null references tickets(id) on delete cascade, slot text not null,
+  scanned_by uuid not null references users(id), created_at timestamptz not null default now(), unique (ticket_id, slot));
+create index if not exists perk_redemptions_fest_idx on perk_redemptions(fest_id, created_at desc);
+alter table perk_redemptions enable row level security;
 ```
 (Running all of `db/schema.sql` does the same — it only adds what's missing.)
 

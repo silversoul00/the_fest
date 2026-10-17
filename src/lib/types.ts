@@ -50,6 +50,11 @@ export interface TicketType {
   sold: number;
   sort: number;
   active: boolean;
+  /** 'addon' = bought on top of an existing ticket (no new ticket, no seat). */
+  kind: 'entry' | 'addon';
+  /** IST dates ('YYYY-MM-DD') this type gives one lunch on. */
+  lunch_days: string[];
+  includes_stay: boolean;
 }
 
 export interface Ticket {

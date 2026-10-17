@@ -33,9 +33,11 @@ async function post(url: string, body: unknown) {
   return j;
 }
 
-export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gateway, upiEnabled, hasPhone, prefill }: {
+export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gateway, upiEnabled, hasPhone, prefill, addonFor }: {
   festSlug: string; signedIn: boolean; isStudent: boolean; types: T[]; feeCfg: FeeConfig; gateway: Gateway; upiEnabled: boolean; hasPhone: boolean;
   prefill: { name: string; email: string; contact: string } | null;
+  /** Buying a lunch/stay add-on for this ticket (from the ticket page): one per ticket, no quantity. */
+  addonFor?: string;
 }) {
   const router = useRouter();
   const [sel, setSel] = useState(types.find((t) => t.left > 0)?.id ?? '');
@@ -51,9 +53,12 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
   const [upi, setUpi] = useState<Upi | null>(null);
 
   const t = types.find((x) => x.id === sel);
-  const maxQty = Math.min(10, t?.left ?? 0);
+  const maxQty = addonFor ? 1 : Math.min(10, t?.left ?? 0);
   const q = t ? quote(t.price, qty, feeCfg, method) : null;
-  const done = (orderId: string) => router.push(`/tickets?order=${orderId}`);
+  const done = (orderId: string) => {
+    if (addonFor) { router.push(`/tickets/${addonFor}?addon=1`); router.refresh(); return; }
+    router.push(`/tickets?order=${orderId}`);
+  };
 
   async function buy() {
     if (!t) return;
@@ -62,7 +67,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
     }
     setBusy(true); setErr('');
     try {
-      const r = await post('/api/checkout', { ticketTypeId: t.id, qty, method, phone: phone || undefined });
+      const r = await post('/api/checkout', { ticketTypeId: t.id, qty, method, phone: phone || undefined, ticketId: addonFor });
       if (r.mode === 'done') return done(r.orderId);
       if (r.mode === 'demo') { setDemo({ orderId: r.orderId, amount: r.amount }); setBusy(false); return; }
       if (r.mode === 'upi') { setUpi(r); setBusy(false); return; }
@@ -147,14 +152,14 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
 
       {t && t.left > 0 && q && !notOnSale && (
         <>
-          <div className="row between">
+          {!addonFor && <div className="row between">
             <span className="label">Quantity</span>
             <div className="row g8">
               <button className="btn sm outline" onClick={() => setQty((v) => Math.max(1, v - 1))} aria-label="Fewer" disabled={qty <= 1}>−</button>
               <span className="mono" style={{ width: 28, textAlign: 'center' }} aria-live="polite">{qty}</span>
               <button className="btn sm outline" onClick={() => setQty((v) => Math.min(maxQty, v + 1))} aria-label="More" disabled={qty >= maxQty}>+</button>
             </div>
-          </div>
+          </div>}
 
           {isPaid && upiEnabled && !cardOff && (
             <div className="stack g8" role="radiogroup" aria-label="Payment method">
@@ -199,7 +204,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
         <div className="alert info">Tickets are bought from a student account. Log out and sign in as a student to buy.</div>
       ) : (
         <button className="btn block" onClick={buy} disabled={busy || !t || t.left <= 0 || notOnSale}>
-          {notOnSale ? 'Not on sale online yet' : busy ? 'Opening payment…' : !q || q.total === 0 ? 'Get free ticket →' : method === 'upi_direct' ? `Pay ${rupees(q.total)} by UPI →` : `Pay ${rupees(q.total)} →`}
+          {notOnSale ? 'Not on sale online yet' : busy ? 'Opening payment…' : !q || q.total === 0 ? (addonFor ? 'Add for free →' : 'Get free ticket →') : method === 'upi_direct' ? `Pay ${rupees(q.total)} by UPI →` : `Pay ${rupees(q.total)} →`}
         </button>
       )}
       {signedIn && isStudent && <p className="xs muted" style={{ textAlign: 'center' }}>By continuing you agree to the <Link href="/legal/terms" className="soft">terms</Link> and <Link href="/legal/refunds" className="soft">refund policy</Link>.</p>}

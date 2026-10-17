@@ -17,6 +17,8 @@ export const REQUIRED_TABLES = [
   'email_verifications', 'upi_credits', 'fest_members', 'password_resets', 'payouts', 'email_outbox',
   // v2.2 (production readiness)
   'login_attempts', 'app_errors', 'app_alert_state',
+  // v2.3 (scanner counters)
+  'perk_redemptions',
 ] as const;
 
 export const REQUIRED_COLUMNS = [
@@ -29,6 +31,7 @@ export const REQUIRED_COLUMNS = [
   'tickets.transferred_to', 'tickets.void_reason',
   'upi_credits.fingerprint',
   'app_errors.repeats',
+  'ticket_types.kind', 'ticket_types.lunch_days', 'ticket_types.includes_stay', 'orders.addon_for',
 ] as const;
 
 /**

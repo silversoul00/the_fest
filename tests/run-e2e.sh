@@ -43,6 +43,7 @@ python3 tests/password.py
 export RACE_FEST=$(eval "$PSQL" -c "\"select id from fests where slug='neon-utsav'\"")
 export RACE_CODE=$(eval "$PSQL" -c "\"select code from tickets where fest_id='$RACE_FEST' and status='valid' limit 1\"")
 export RACE_TT=$(eval "$PSQL" -c "\"update ticket_types set quota = sold + 1 where fest_id=(select id from fests where slug='kalaa-fest') and name='Workshop Bundle' returning id\"")
+export RACE_LUNCH_CODE=$(eval "$PSQL" -c "\"select t.code from tickets t join ticket_types tt on tt.id=t.ticket_type_id where t.fest_id='$RACE_FEST' and tt.name='3-Day Pass' and t.status<>'void' and not exists (select 1 from perk_redemptions p where p.ticket_id=t.id) order by t.code desc limit 1\"")
 python3 tests/race.py
 python3 tests/team.py
 python3 tests/analytics.py

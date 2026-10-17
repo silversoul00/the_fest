@@ -375,3 +375,22 @@ create table if not exists app_alert_state (
 alter table login_attempts  enable row level security;
 alter table app_errors      enable row level security;
 alter table app_alert_state enable row level security;
+
+-- v2.3 (Oct 2026): one QR, different counters. Lunch and stay perks live on ticket types (included with an entry
+-- ticket, or sold as an add-on attached to an existing ticket); each lunch day / stay check-in / check-out is used once.
+alter table ticket_types add column if not exists kind text not null default 'entry' check (kind in ('entry', 'addon'));
+alter table ticket_types add column if not exists lunch_days date[] not null default '{}';
+alter table ticket_types add column if not exists includes_stay boolean not null default false;
+alter table orders add column if not exists addon_for uuid references tickets(id) on delete set null;
+create index if not exists orders_addon_for_idx on orders(addon_for) where addon_for is not null;
+create table if not exists perk_redemptions (
+  id          bigserial primary key,
+  fest_id     uuid not null references fests(id) on delete cascade,
+  ticket_id   uuid not null references tickets(id) on delete cascade,
+  slot        text not null,                      -- 'lunch:2026-11-02' | 'stay_in' | 'stay_out'
+  scanned_by  uuid not null references users(id),
+  created_at  timestamptz not null default now(),
+  unique (ticket_id, slot)
+);
+create index if not exists perk_redemptions_fest_idx on perk_redemptions(fest_id, created_at desc);
+alter table perk_redemptions enable row level security;

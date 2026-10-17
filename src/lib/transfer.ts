@@ -38,6 +38,9 @@ export async function transferTicket(ticketId: string, fromUserId: string, toEma
       values (${ticketCode()}, ${t.order_id}, ${to.id}, ${t.fest_id}, ${t.ticket_type_id}, ${to.name})
       returning id`;
     await tx`update tickets set status = 'void', void_reason = ${`Transferred to ${to.name}`}, transferred_to = ${n.id} where id = ${t.id}`;
+    // Lunch/stay add-ons and perks already used move with the ticket (so a transfer can't reset a lunch already taken).
+    await tx`update orders set addon_for = ${n.id} where addon_for = ${t.id}`;
+    await tx`update perk_redemptions set ticket_id = ${n.id} where ticket_id = ${t.id}`;
     return { newId: n.id, to, from: { name: t.from_name, email: t.from_email }, festName: t.fest_name };
   });
 

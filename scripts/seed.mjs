@@ -66,6 +66,8 @@ try {
   await mkUser('sponsor@thefest.in', 'Neha Brand Manager', 'sponsor');
   const volunteer = await mkUser('volunteer@thefest.in', 'Kiran Volunteer', 'student', COLLEGES[0]);
   const admin = await mkUser('admin@thefest.in', 'THE FEST Admin', 'organizer');
+  await mkUser('lunch@seed.thefest.in', 'Lata Lunch', 'student', COLLEGES[0]);
+  await mkUser('stay@seed.thefest.in', 'Sunil Stay', 'student', COLLEGES[0]);
   await sql`update users set is_admin = true where id = ${admin}`;
 
   // ~120 attendees
@@ -78,7 +80,8 @@ try {
   const FESTS = [
     { slug: 'neon-utsav', org: organizer, name: 'Neon Utsav', college: COLLEGES[0], city: 'Bengaluru', venue: 'Main Grounds, Block A', category: 'cultural', s: -1, e: 1, emoji: '🎆', accent: '#FFE034', cap: 3000,
       desc: 'Three nights of pro shows, dance battles and an indie music stage. The flagship sample fest on THE FEST — explore it to see how everything works.',
-      types: [['Day Pass', 'Entry for one day, all open events', 29900, 1200], ['3-Day Pass', 'All three days + pro night standing', 69900, 900], ['VIP Pro Night', 'Front pit for the headline act', 149900, 150]] },
+      types: [['Day Pass', 'Entry for one day, all open events', 29900, 1200], ['3-Day Pass', 'All three days + pro night standing, lunch on days 2–3 and hostel stay', 69900, 900, { lunch: [0, 1], stay: true }], ['VIP Pro Night', 'Front pit for the headline act', 149900, 150],
+             ['Lunch add-on', 'Lunch on days 2–3', 9900, 500, { lunch: [0, 1], addon: true }]] },
     { slug: 'hackverse', org: organizer, name: 'Hackverse 36', college: COLLEGES[0], city: 'Bengaluru', venue: 'Innovation Centre', category: 'tech', s: 12, e: 13, emoji: '🚀', accent: '#38BDF8', cap: 600,
       desc: 'A 36-hour student hackathon with workshops, mentor hours and ₹2L in prizes. Sample data.',
       types: [['Hacker (team member)', 'One seat in a team of up to 4', 0, 400], ['Workshop Pass', 'All workshops, no hacking', 19900, 200]] },
@@ -106,9 +109,11 @@ try {
     festIds[f.slug] = row.id;
     typeIds[f.slug] = [];
     let sort = 0;
-    for (const [name, description, price, quota] of f.types) {
-      const [t] = await sql`insert into ticket_types (fest_id, name, description, price_paise, quota, sort)
-                            values (${row.id}, ${name}, ${description}, ${price}, ${quota}, ${sort++}) returning id, price_paise`;
+    for (const [name, description, price, quota, perks = {}] of f.types) {
+      const lunch = `{${(perks.lunch ?? []).map(day).join(',')}}`;
+      const [t] = await sql`insert into ticket_types (fest_id, name, description, price_paise, quota, sort, kind, lunch_days, includes_stay)
+                            values (${row.id}, ${name}, ${description}, ${price}, ${quota}, ${sort++},
+                                    ${perks.addon ? 'addon' : 'entry'}, ${lunch}::date[], ${!!perks.stay}) returning id, price_paise`;
       typeIds[f.slug].push(t);
     }
   }
@@ -158,10 +163,12 @@ try {
     ['gate3@seed.thefest.in', 'Priya Gate', 'Gate 3'],
     ['desk@seed.thefest.in', 'Lakshmi Desk', 'Registration desk'],
     ['stage@seed.thefest.in', 'Rahul Stage', 'Main stage'],
+    ['lunch@seed.thefest.in', 'Lata Lunch', 'Lunch counter'],
+    ['stay@seed.thefest.in', 'Sunil Stay', 'Stay desk'],
   ];
   for (const [i, [email, name, duty]] of staff.entries()) {
     await sql`insert into fest_staff (fest_id, email, name, duty, can_scan, checked_in_at)
-              values (${festIds['neon-utsav']}, ${email}, ${name}, ${duty}, ${duty.startsWith('Gate')}, ${i < 4 ? at(0, 9, 10 * i) : null})`;
+              values (${festIds['neon-utsav']}, ${email}, ${name}, ${duty}, ${/^(Gate|Lunch|Stay)/.test(duty)}, ${i < 4 ? at(0, 9, 10 * i) : null})`;
   }
   await sql`insert into fest_staff (fest_id, email, name, duty) values (${festIds['hackverse']}, 'volunteer@thefest.in', 'Kiran Volunteer', 'Gate 1')`;
 

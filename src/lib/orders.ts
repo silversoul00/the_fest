@@ -20,14 +20,15 @@ export type Provider = 'razorpay' | 'cashfree' | 'demo' | 'free' | 'upi_direct';
  * orders where the student has already submitted a UTR (money may have left
  * their account); those wait for verification or an organizer's decision.
  */
-export async function createOrder(input: { userId: string; ticketTypeId: string; qty: number; method?: Method }) {
-  const { userId, ticketTypeId, qty } = input;
+export async function createOrder(input: { userId: string; ticketTypeId: string; qty: number; method?: Method; ticketId?: string }) {
+  const { userId, ticketTypeId } = input;
+  let qty = input.qty;
   const method: Method = input.method ?? 'gateway';
   if (!Number.isInteger(qty) || qty < 1 || qty > 10) throw new OrderError('Choose between 1 and 10 tickets.');
 
   return sql.begin(async (tx) => {
-    const [tt] = await tx<{ id: string; fest_id: string; price_paise: number; quota: number; sold: number; active: boolean; status: string; capacity: number | null; ends_on: string; name: string; upi_enabled: boolean; upi_vpa: string | null }[]>`
-      select tt.id, tt.fest_id, tt.price_paise, tt.quota, tt.sold, tt.active, tt.name,
+    const [tt] = await tx<{ id: string; fest_id: string; price_paise: number; quota: number; sold: number; active: boolean; status: string; capacity: number | null; ends_on: string; name: string; upi_enabled: boolean; upi_vpa: string | null; kind: string }[]>`
+      select tt.id, tt.fest_id, tt.price_paise, tt.quota, tt.sold, tt.active, tt.name, tt.kind,
              f.status, f.capacity, f.ends_on, f.upi_enabled, f.upi_vpa
       from ticket_types tt join fests f on f.id = tt.fest_id
       where tt.id = ${ticketTypeId}
@@ -39,6 +40,20 @@ export async function createOrder(input: { userId: string; ticketTypeId: string;
       throw new OrderError('This fest does not accept direct UPI. Choose card/UPI checkout.');
     }
 
+    // Add-ons (lunch / stay) attach to one ticket the buyer holds for this fest: one per ticket, no new ticket, no seat.
+    let addonFor: string | null = null;
+    if (tt.kind === 'addon') {
+      if (!input.ticketId) throw new OrderError('Add-ons are bought from your ticket page.');
+      const [t] = await tx<{ id: string }[]>`
+        select id from tickets where id = ${input.ticketId} and user_id = ${userId} and fest_id = ${tt.fest_id} and status <> 'void'
+        for update`;
+      if (!t) throw new OrderError('Pick one of your valid tickets for this fest.');
+      const [dup] = await tx`select 1 from orders where addon_for = ${t.id} and ticket_type_id = ${ticketTypeId} and status in ('paid', 'pending')`;
+      if (dup) throw new OrderError(`This ticket already has ${tt.name}.`);
+      addonFor = t.id;
+      qty = 1;
+    }
+
     const released = await releaseExpiredHolds(tx, ticketTypeId);
     const sold = tt.sold - released;
 
@@ -48,16 +63,16 @@ export async function createOrder(input: { userId: string; ticketTypeId: string;
       throw new OrderError(left <= 0 ? `${tt.name} is sold out.` : `Only ${left} left for ${tt.name}.`);
     }
 
-    // Per-student limit: 10 tickets per fest
+    // Per-student limit: 10 tickets per fest (add-ons aren't tickets)
     const [{ owned }] = await tx<{ owned: number }[]>`
       select coalesce(sum(qty), 0)::int as owned from orders
-      where user_id = ${userId} and fest_id = ${tt.fest_id} and status in ('paid', 'pending')`;
-    if (owned + qty > 10) throw new OrderError('You can hold at most 10 tickets for one fest.');
+      where user_id = ${userId} and fest_id = ${tt.fest_id} and status in ('paid', 'pending') and addon_for is null`;
+    if (!addonFor && owned + qty > 10) throw new OrderError('You can hold at most 10 tickets for one fest.');
 
-    // Fest-wide capacity across all ticket types
-    if (tt.capacity) {
+    // Fest-wide capacity across all entry ticket types (add-ons don't take a seat)
+    if (tt.capacity && !addonFor) {
       const [{ total }] = await tx<{ total: number }[]>`
-        select coalesce(sum(sold), 0)::int as total from ticket_types where fest_id = ${tt.fest_id}`;
+        select coalesce(sum(sold), 0)::int as total from ticket_types where fest_id = ${tt.fest_id} and kind = 'entry'`;
       if (total - released + qty > tt.capacity) throw new OrderError('The fest has reached full capacity.');
     }
 
@@ -88,9 +103,9 @@ export async function createOrder(input: { userId: string; ticketTypeId: string;
 
     const provider: Provider = free ? 'free' : method === 'upi_direct' ? 'upi_direct' : 'demo';
     const [order] = await tx<{ id: string }[]>`
-      insert into orders (user_id, fest_id, ticket_type_id, qty, amount_paise, platform_fee_paise, gateway_fee_paise, provider, method)
+      insert into orders (user_id, fest_id, ticket_type_id, qty, amount_paise, platform_fee_paise, gateway_fee_paise, provider, method, addon_for)
       values (${userId}, ${tt.fest_id}, ${ticketTypeId}, ${qty}, ${amount}, ${q.fee}, ${q.gatewayFee}, ${provider},
-              ${free ? 'free' : method})
+              ${free ? 'free' : method}, ${addonFor})
       returning id`;
     return { orderId: order.id, amount, fee: q.fee, gatewayFee: q.gatewayFee, festId: tt.fest_id, free, upiVpa: tt.upi_vpa };
   });
@@ -115,8 +130,8 @@ async function releaseExpiredHolds(tx: postgres.TransactionSql, ticketTypeId: st
  */
 export async function fulfilOrder(orderId: string, payment?: { provider: Provider; paymentId?: string; verifySource?: string }) {
   const res = await sql.begin(async (tx) => {
-    const [o] = await tx<{ id: string; user_id: string; fest_id: string; ticket_type_id: string; qty: number; status: string }[]>`
-      select id, user_id, fest_id, ticket_type_id, qty, status from orders where id = ${orderId} for update`;
+    const [o] = await tx<{ id: string; user_id: string; fest_id: string; ticket_type_id: string; qty: number; status: string; addon_for: string | null }[]>`
+      select id, user_id, fest_id, ticket_type_id, qty, status, addon_for from orders where id = ${orderId} for update`;
     if (!o) throw new OrderError('Order not found.');
     if (o.status === 'paid') return { issued: 0, already: true };
     if (o.status === 'refunded') throw new OrderError('Order was refunded.');
@@ -157,6 +172,9 @@ export async function fulfilOrder(orderId: string, payment?: { provider: Provide
               verify_source = coalesce(${payment?.verifySource ?? null}, verify_source),
               review_flag = null
             where id = ${orderId}`;
+
+    // Add-on: the perk rides on the existing ticket (its QR doesn't change) — no new ticket rows.
+    if (o.addon_for) return { issued: 0, already: false, userId: o.user_id, festId: o.fest_id };
 
     const [u] = await tx<{ name: string }[]>`select name from users where id = ${o.user_id}`;
     for (let i = 0; i < o.qty; i++) {
