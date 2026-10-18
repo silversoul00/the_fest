@@ -73,6 +73,12 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   4. Database: "Yes, both" — add `fests.qr_epoch` (v2.4) to production `thefest` and preview `thefest-preview`
      (applied Oct 18, 2026).
 
+## Direction (Oct 18, 2026)
+- Harshith: "I can't get this live for now and all I can do is build this fully and have it ready deployable."
+  Going live is a later step; keep the app complete and deploy-ready (settings pasted in + deploy).
+- Next build, his pick: **sponsor lead capture + sponsor ROI report**. Later candidates (not yet chosen): quick fest
+  setup / copy last year's fest, Kannada/Hindi scanner, live crowd view, WhatsApp (built switched off), deploy pack.
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.
