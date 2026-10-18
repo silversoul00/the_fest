@@ -83,6 +83,9 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 - Harshith: "make it so that they (org) can send sponsorship request [and] the sponsors request for the sponsorships."
   Two-way: organizers send sponsorship requests/pitches to brands; brands request to sponsor fests. (This is the start of
   the marketplace in his revenue plan.)
+- His answers (Oct 18, 2026): add v2.6 (brand profiles, sponsor_requests, fests.open_to_sponsors) to **both** Supabase
+  databases once tests pass — "Yes, both". Fests are **hidden from brands until the organizer switches on**
+  "Show this fest to brands". Contacts hidden until a request is accepted; money settled off-platform in v1.
 
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
