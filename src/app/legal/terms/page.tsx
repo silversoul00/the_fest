@@ -5,7 +5,7 @@ export const metadata = { title: 'Terms of use' };
 
 export default function Terms() {
   return (
-    <LegalPage title="Terms of use" updated="17 October 2026">
+    <LegalPage title="Terms of use" updated="18 October 2026">
       <p>
         These terms apply when you use THE FEST (thefest.in and its apps), run by <b><Fill v={BIZ.legalName} what="legal name of the business" /></b>{' '}
         (&ldquo;THE FEST&rdquo;, &ldquo;we&rdquo;). By creating an account or buying a ticket you agree to them.
@@ -53,6 +53,11 @@ export default function Terms() {
       <p>
         Footfall and booth-visit numbers are counted from real scans. They are provided as is; we do our best to keep them accurate but do
         not guarantee them for any commercial purpose.
+      </p>
+      <p>
+        Leads are students who chose to share their contact at your booth. A sponsor may use them only for the purpose shown to students
+        (contacting them about the sponsor&apos;s own products, offers and opportunities), must not sell or pass them on, and must delete
+        anyone listed as &ldquo;withdrawn&rdquo; from every copy it holds, promptly.
       </p>
 
       <h2>7. What you must not do</h2>

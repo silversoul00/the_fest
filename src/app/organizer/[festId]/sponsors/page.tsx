@@ -3,6 +3,9 @@ import { getOwnFest, getSponsors } from '@/lib/queries';
 import { num, rupees } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty, Stat } from '@/components/ui';
+import Link from 'next/link';
+import { sql } from '@/lib/db';
+import { leadsReady } from '@/lib/sponsor-leads';
 import { addSponsor, removeSponsor } from '../../actions';
 
 export default async function Sponsors({ params }: { params: Promise<{ festId: string }> }) {
@@ -11,6 +14,13 @@ export default async function Sponsors({ params }: { params: Promise<{ festId: s
   const sponsors = await getSponsors(fest.id);
   const total = sponsors.reduce((a, s) => a + s.amount_paise, 0);
   const visits = sponsors.reduce((a, s) => a + s.visits, 0);
+  // Organizers see how many students shared (a count) — never the contacts.
+  const leadRows = (await leadsReady())
+    ? await sql<{ sponsor_id: string; n: number }[]>`
+        select l.sponsor_id, count(*)::int n from sponsor_leads l join sponsors s on s.id = l.sponsor_id
+        where s.fest_id = ${fest.id} and l.withdrawn_at is null group by 1`
+    : [];
+  const leadsBy = new Map(leadRows.map((r) => [r.sponsor_id, r.n]));
 
   return (
     <div className="stack g16">
@@ -28,8 +38,9 @@ export default async function Sponsors({ params }: { params: Promise<{ festId: s
               <div className="avatar" style={{ color: 'var(--blue)' }}>{s.brand.slice(0, 2).toUpperCase()}</div>
               <div className="grow" style={{ minWidth: 160 }}>
                 <div>{s.brand} <span className="badge blue" style={{ marginLeft: 4 }}>{s.tier}</span></div>
-                <div className="xs muted truncate">{s.email} · {rupees(s.amount_paise)} · {num(s.visits)} booth visits</div>
+                <div className="xs muted truncate">{s.email} · {rupees(s.amount_paise)} · {num(s.visits)} booth visits · {num(leadsBy.get(s.id) ?? 0)} leads</div>
               </div>
+              <Link className="btn sm outline" href={`/organizer/${fest.id}/sponsors/${s.id}/report`}>Report</Link>
               <a className="btn sm outline" href={`/booth/${s.booth_code}/print`} target="_blank" rel="noopener">Booth QR</a>
               <form action={removeSponsor}>
                 <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={s.id} />

@@ -232,6 +232,15 @@ try {
     (${festIds['neon-utsav']}, 'brand2@seed.thefest.in', 'PixelPhone', 'Partner', 7500000, ${randomBytes(9).toString('base64url')})`;
   for (const u of crowd.slice(0, 74)) await sql`insert into sponsor_visits (sponsor_id, user_id, created_at) values (${s1}, ${u}, ${at(0, 10 + randomInt(9), randomInt(60))})`;
   for (const u of crowd.slice(0, 12)) await sql`insert into sponsor_visits (sponsor_id, user_id) values (${s2}, ${u})`;
+  // Sample leads: 10 booth visitors chose to share with Volt Energy at Neon Utsav; one later stopped sharing.
+  const COURSES = ['B.E. CSE, 3rd year', 'B.Com, 2nd year', 'B.Des, final year', null, 'MBA, 1st year'];
+  for (const [i, u] of crowd.slice(0, 10).entries()) {
+    await sql`insert into sponsor_leads (sponsor_id, user_id, name, email, college, course_year, notice_version, shared_at)
+              select ${s1}, u.id, u.name, u.email, u.college, ${COURSES[i % COURSES.length]}, 'lead-v1', v.created_at + interval '1 minute'
+              from users u join sponsor_visits v on v.user_id = u.id where u.id = ${u} and v.sponsor_id = ${s1}`;
+  }
+  await sql`update sponsor_leads set name = null, college = null, course_year = null, withdrawn_at = shared_at + interval '2 hours'
+            where sponsor_id = ${s1} and user_id = ${crowd[9]}`;
 
   const [{ t }] = await sql`select count(*)::int as t from tickets`;
   console.log(`✓ Seeded ${FESTS.length} fests, ${crowd.length + 5} users, ${t} tickets`);

@@ -2,6 +2,7 @@ import { getUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { isUuid } from '@/lib/http';
 import { canManage } from '@/lib/queries';
+import { csvResponse, toCsv } from '@/lib/csv';
 
 // CSV of every issued ticket — for the registration desk, certificates, or Excel.
 export async function GET(_req: Request, { params }: { params: Promise<{ festId: string }> }) {
@@ -20,19 +21,5 @@ export async function GET(_req: Request, { params }: { params: Promise<{ festId:
     where t.fest_id = ${festId} order by o.paid_at`;
 
   const cols = ['code', 'holder_name', 'email', 'phone', 'college', 'ticket_type', 'paid_per_ticket_inr', 'payment', 'bought_ist', 'status', 'checked_in_ist', 'gate'];
-  // Quote every cell; neutralise spreadsheet formula injection (=, +, -, @)
-  const cell = (v: unknown) => {
-    let s = v === null || v === undefined ? '' : String(v);
-    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return `"${s.replace(/"/g, '""')}"`;
-  };
-  const csv = '﻿' + [cols.join(','), ...rows.map((r) => cols.map((c) => cell(r[c])).join(','))].join('\r\n');
-
-  return new Response(csv, {
-    headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${fest.slug}-tickets.csv"`,
-      'Cache-Control': 'no-store',
-    },
-  });
+  return csvResponse(toCsv(cols, rows), `${fest.slug}-tickets.csv`);
 }

@@ -398,3 +398,24 @@ alter table perk_redemptions enable row level security;
 -- v2.4 (Oct 2026): Smart QR. qr_epoch picks the scanner keys sealed into new ticket QRs; "Reset scanner keys"
 -- (Volunteers tab, after a lost phone) bumps it.
 alter table fests add column if not exists qr_epoch smallint not null default 1;
+
+-- v2.5 (Oct 2026): sponsor leads. A student can choose to share their contact with a brand at its booth (18+ tick,
+-- optional phone) and stop sharing any time. After stopping, only the email stays so the brand knows whom to delete.
+alter table sponsors add column if not exists lead_offer text;          -- "what students get for sharing", ≤120 chars
+create table if not exists sponsor_leads (
+  id             bigserial primary key,
+  sponsor_id     uuid not null references sponsors(id) on delete cascade,
+  user_id        uuid not null references users(id) on delete cascade,
+  name           text,                -- snapshot when shared (null after withdrawal)
+  email          citext not null,     -- kept after withdrawal ONLY for the brand's "remove" list
+  phone          text,                -- only if the student ticked "Also share my phone"
+  college        text,
+  course_year    text,                -- optional, typed at the booth (≤60 chars)
+  notice_version text not null,       -- the notice the student agreed to, e.g. 'lead-v1'
+  shared_at      timestamptz not null default now(),
+  withdrawn_at   timestamptz,
+  unique (sponsor_id, user_id)
+);
+create index if not exists sponsor_leads_sponsor_idx on sponsor_leads(sponsor_id, shared_at desc);
+create index if not exists sponsor_leads_user_idx on sponsor_leads(user_id);
+alter table sponsor_leads enable row level security;

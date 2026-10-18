@@ -178,4 +178,12 @@ begin
   from (select id, row_number() over (order by email) as r from users where email like 'attendee%') u where r <= 74;
   insert into sponsor_visits (sponsor_id, user_id)
   select s2, id from (select id, row_number() over (order by email) as r from users where email like 'attendee%') u where r <= 12;
+  -- Sample leads (needs v2.5): 10 booth visitors chose to share with Volt Energy at Neon Utsav; one later stopped sharing.
+  insert into sponsor_leads (sponsor_id, user_id, name, email, college, course_year, notice_version, shared_at, withdrawn_at)
+  select s1, u.id, case when r < 10 then u.name end, u.email, case when r < 10 then u.college end,
+         case when r < 10 then (array['B.E. CSE, 3rd year','B.Com, 2nd year','B.Des, final year',null,'MBA, 1st year'])[1 + (r % 5)::int] end,
+         'lead-v1', v.created_at + interval '1 minute', case when r = 10 then v.created_at + interval '2 hours' end
+  from (select id, name, email, college, row_number() over (order by email) as r from users where email like 'attendee%') u
+  join sponsor_visits v on v.sponsor_id = s1 and v.user_id = u.id
+  where r <= 10;
 end $$;

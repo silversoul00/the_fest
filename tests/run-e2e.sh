@@ -68,4 +68,7 @@ python3 tests/throttle.py
 python3 tests/round2.py
 # Smart QR (2026-10-18): public /t/ page, sealed sections per scanner role offline, live code, key reset, offline sync (fix round 1: first aid removed, sync resilience, lunch day, lock)
 python3 tests/smartqr.py
+# Sponsor leads + ROI report (2026-10-18): opt-in sharing at the booth (18+), stop sharing, sponsor leads/CSV/withdrawn,
+# report numbers, access, organizer counts only, print, 390px, old database without v2.5 (:3007)
+python3 tests/sponsor_leads.py
 echo "✓ Release check passed"

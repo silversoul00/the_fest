@@ -19,6 +19,8 @@ export const REQUIRED_TABLES = [
   'login_attempts', 'app_errors', 'app_alert_state',
   // v2.3 (scanner counters)
   'perk_redemptions',
+  // v2.5 (sponsor leads)
+  'sponsor_leads',
 ] as const;
 
 export const REQUIRED_COLUMNS = [
@@ -33,6 +35,7 @@ export const REQUIRED_COLUMNS = [
   'app_errors.repeats',
   'ticket_types.kind', 'ticket_types.lunch_days', 'ticket_types.includes_stay', 'orders.addon_for',
   'fests.qr_epoch',
+  'sponsors.lead_offer',
 ] as const;
 
 /**
