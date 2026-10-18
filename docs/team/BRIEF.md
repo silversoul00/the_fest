@@ -70,6 +70,8 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   2. First aid: "Skip first aid for now" — remove the first-aid card/opt-in, `medical_profiles` table (never shipped),
      first-aid scanner role and related UI. Gate / lunch / stay / organizer sections stay.
   3. Old screenshots at the gate: **warn only** (as built), do not block.
+  4. Database: "Yes, both" — add `fests.qr_epoch` (v2.4) to production `thefest` and preview `thefest-preview`
+     (applied Oct 18, 2026).
 
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
