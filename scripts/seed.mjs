@@ -244,6 +244,29 @@ try {
   await sql`update sponsor_leads set name = null, college = null, course_year = null, withdrawn_at = least(shared_at + interval '2 hours', now())
             where sponsor_id = ${s1} and user_id = ${crowd[9]}`;
 
+  // Sponsorship requests (v2.6): two listed brands, two fests open to brands, requests both ways in each status.
+  const [{ id: volt }] = await sql`select id from users where email = 'sponsor@thefest.in'`;
+  const chai = await mkUser('brand@seed.thefest.in', 'Kabir Chai Point', 'sponsor');
+  await sql`insert into brand_profiles (user_id, brand, category, budget_min_paise, budget_max_paise, cities, about, listed) values
+    (${volt}, 'Volt Energy', 'food', 5000000, 50000000, '{Bengaluru,Mysuru}', 'Energy drinks for students who stay up for the pro night.', true),
+    (${chai}, 'Chai Point Express', 'food', 2500000, 15000000, '{Bengaluru}', 'Chai and snack kiosks at campus events.', true)`;
+  await sql`update fests set open_to_sponsors = true where slug in ('neon-utsav', 'kalaa-fest')`;
+  const [{ id: chaiSponsor }] = await sql`select id from sponsors where email = 'brand@seed.thefest.in' and fest_id = ${festIds['neon-utsav']}`;
+  const rq = (slug, brandUser, direction, brand, tier, amount, sentBy, status, more = {}) => sql`
+    insert into sponsor_requests (fest_id, brand_user_id, direction, brand, tier, amount_paise, deliverables, message, status, reply, sent_by, decided_by, sponsor_id, created_at, decided_at)
+    values (${festIds[slug]}, ${brandUser}, ${direction}, ${brand}, ${tier}, ${amount}, ${more.deliverables ?? null}, ${more.message ?? null}, ${status},
+            ${more.reply ?? null}, ${sentBy}, ${status === 'sent' ? null : more.decidedBy ?? sentBy}, ${more.sponsorId ?? null},
+            now() - interval '3 days', ${status === 'sent' ? null : sql`now() - interval '1 day'`})`;
+  await rq('kalaa-fest', volt, 'brand_to_org', 'Volt Energy', 'Powered by', 12000000, volt, 'sent',
+    { deliverables: 'Stall near the main stage, 4 emcee mentions, logo on passes', message: 'We would love to power the folk-fusion night.' });
+  await rq('commerce-carnival', volt, 'org_to_brand', 'Volt Energy', 'Associate', 6000000, organizer2, 'sent',
+    { deliverables: 'Stall at the quad, logo on the B-plan stage', message: '800 delegates from colleges across Bengaluru.' });
+  await rq('neon-utsav', chai, 'brand_to_org', 'Chai Point Express', 'Associate', 10000000, chai, 'accepted',
+    { deliverables: 'Two kiosks, one stage mention per night', decidedBy: organizer, sponsorId: chaiSponsor });
+  await rq('hackverse', chai, 'org_to_brand', 'Chai Point Express', 'Partner', 3000000, organizer, 'declined',
+    { message: '36 hours of hacking needs a lot of chai!', reply: 'Our budget for this quarter is used up.', decidedBy: chai });
+  await rq('kalaa-fest', chai, 'brand_to_org', 'Chai Point Express', 'Partner', 2500000, chai, 'withdrawn', {});
+
   const [{ t }] = await sql`select count(*)::int as t from tickets`;
   console.log(`✓ Seeded ${FESTS.length} fests, ${crowd.length + 5} users, ${t} tickets`);
   console.log('  Demo logins (password123): student@ · organizer@ · sponsor@ · volunteer@ · admin@thefest.in');

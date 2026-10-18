@@ -17,7 +17,8 @@ const TABS = [
   { seg: '/settings', icon: '⚙️', label: 'Settings' },
 ];
 
-export function OrgShell({ festId, festName, slug, status, fests, userName, isAdmin, logoutAction, children }: {
+export function OrgShell({ festId, festName, slug, status, fests, userName, isAdmin, logoutAction, badges = {}, children }: {
+  badges?: Record<string, number>;
   festId: string; festName: string; slug: string; status: string; fests: OrgFestLink[]; userName: string; isAdmin?: boolean;
   logoutAction: () => Promise<void>; children: React.ReactNode;
 }) {
@@ -40,7 +41,7 @@ export function OrgShell({ festId, festName, slug, status, fests, userName, isAd
         <div className="side-sep">Manage</div>
         {TABS.map((t) => (
           <Link key={t.seg} href={base + t.seg} className="side-link" aria-current={cur(t.seg)}>
-            <span className="i">{t.icon}</span>{t.label}
+            <span className="i">{t.icon}</span>{t.label}{badges[t.seg] ? <span className="badge yellow tab-count" style={{ marginLeft: 6 }}>{badges[t.seg]}</span> : null}
           </Link>
         ))}
         {fests.length > 1 && (
@@ -72,7 +73,7 @@ export function OrgShell({ festId, festName, slug, status, fests, userName, isAd
         <nav className="tabstrip" aria-label="Fest sections">
           <div className="chips">
             {TABS.map((t) => (
-              <Link key={t.seg} href={base + t.seg} className={`chip ${cur(t.seg) ? 'on' : ''}`}>{t.icon} {t.label}</Link>
+              <Link key={t.seg} href={base + t.seg} className={`chip ${cur(t.seg) ? 'on' : ''}`}>{t.icon} {t.label}{badges[t.seg] ? ` (${badges[t.seg]})` : ''}</Link>
             ))}
           </div>
         </nav>

@@ -419,3 +419,47 @@ create table if not exists sponsor_leads (
 create index if not exists sponsor_leads_sponsor_idx on sponsor_leads(sponsor_id, shared_at desc);
 create index if not exists sponsor_leads_user_idx on sponsor_leads(user_id);
 alter table sponsor_leads enable row level security;
+
+-- v2.6 (Oct 2026): two-way sponsorship requests. Brands keep a profile (optionally listed for organizers); organizers
+-- switch on "Show this fest to brands". Either side sends a request; accepting it creates the normal sponsors row.
+-- Contacts stay hidden until accepted; money is settled off-platform. "Expired" is not stored: a request whose fest has
+-- ended or was cancelled reads as expired and can't be accepted.
+alter table fests add column if not exists open_to_sponsors boolean not null default false;
+create table if not exists brand_profiles (
+  user_id          uuid primary key references users(id) on delete cascade,
+  brand            text not null check (char_length(brand) between 2 and 80),
+  category         text not null default 'other'
+                   check (category in ('food', 'tech', 'edtech', 'fashion', 'finance', 'telecom', 'other')),
+  budget_min_paise int  not null default 0 check (budget_min_paise between 0 and 1000000000),
+  budget_max_paise int  not null default 0 check (budget_max_paise between 0 and 1000000000),
+  cities           text[] not null default '{}' check (cardinality(cities) <= 5),
+  about            text check (char_length(about) <= 300),
+  listed           boolean not null default false,   -- opt-in to the organizers' "Find brands" list
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index if not exists brand_profiles_listed_idx on brand_profiles(listed, category);
+create table if not exists sponsor_requests (
+  id            uuid primary key default gen_random_uuid(),
+  fest_id       uuid not null references fests(id) on delete cascade,
+  brand_user_id uuid not null references users(id) on delete cascade,
+  direction     text not null check (direction in ('org_to_brand', 'brand_to_org')),
+  brand         text not null,                       -- snapshot of the brand name when sent
+  tier          text not null,
+  amount_paise  int  not null check (amount_paise between 0 and 1000000000),   -- ≤ ₹1 crore
+  deliverables  text check (char_length(deliverables) <= 600),
+  message       text check (char_length(message) <= 1000),
+  status        text not null default 'sent' check (status in ('sent', 'accepted', 'declined', 'withdrawn')),
+  reply         text check (char_length(reply) <= 300),   -- optional note with a decline
+  sent_by       uuid references users(id) on delete set null,
+  decided_by    uuid references users(id) on delete set null,
+  sponsor_id    uuid references sponsors(id) on delete set null,   -- set on accept
+  created_at    timestamptz not null default now(),
+  decided_at    timestamptz
+);
+-- one open request per fest–brand pair
+create unique index if not exists sponsor_requests_open_idx on sponsor_requests(fest_id, brand_user_id) where status = 'sent';
+create index if not exists sponsor_requests_brand_idx on sponsor_requests(brand_user_id, created_at desc);
+create index if not exists sponsor_requests_fest_idx on sponsor_requests(fest_id, created_at desc);
+alter table brand_profiles   enable row level security;
+alter table sponsor_requests enable row level security;

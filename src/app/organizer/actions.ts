@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
-import { rupees, slugify } from '@/lib/format';
+import { rupees, slugify, todayIST } from '@/lib/format';
 import { cancelFest, refundOrder } from '@/lib/refunds';
 import { OrderError } from '@/lib/orders';
 import { boothCode } from '@/lib/ticket-crypto';
@@ -13,7 +13,8 @@ import { canManage } from '@/lib/queries';
 import { leadsReady } from '@/lib/sponsor-leads';
 import { siteUrl } from '@/lib/env';
 import { afterResponse } from '@/lib/errors';
-import { sendEmail } from '@/lib/mail';
+import { notifySponsorRequest, sendEmail } from '@/lib/mail';
+import { REQUESTS_MISSING, createRequest, decideRequest, parseRequestFields, requestsReady, type Decision } from '@/lib/sponsor-requests';
 import { matchCredits, confirmManually, rejectUpiOrder as rejectUpi, newInboundToken } from '@/lib/upi';
 import { parseAlerts, parseCsv, parseStatement, VPA_RE, type Credit } from '@/lib/upi-parse';
 import type { MatchResult } from '@/lib/upi';
@@ -309,6 +310,49 @@ export async function removeSponsor(fd: FormData) {
   }
   refresh(fest.id);
   redirect(`/organizer/${fest.id}/sponsors?removed=1`);
+}
+
+// ─── Sponsorship requests (v2.6) — owner and co-organizers, same rule as addSponsor ───
+export async function setOpenToSponsors(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  if (!(await requestsReady())) return { error: REQUESTS_MISSING };
+  const open = fd.get('open') === 'on';
+  await sql`update fests set open_to_sponsors = ${open} where id = ${fest.id}`;
+  refresh(fest.id);
+  return { ok: true, message: open ? 'Brands can now find this fest and see its media kit.' : 'Hidden from brands.' };
+}
+
+export async function sendBrandRequest(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { user, fest } = await ownFest(fd);
+  if (!(await requestsReady())) return { error: REQUESTS_MISSING };
+  const brandUserId = s(fd, 'brandUserId');
+  if (!isUuid(brandUserId)) return { error: 'Brand not found.' };
+  const [f] = await sql`select 1 from fests where id = ${fest.id} and status not in ('cancelled', 'ended') and ends_on >= ${todayIST()}`;
+  if (!f) return { error: 'This fest has ended or was cancelled.' };
+  const [b] = await sql<{ brand: string }[]>`
+    select p.brand from brand_profiles p join users u on u.id = p.user_id where p.user_id = ${brandUserId} and p.listed and u.role = 'sponsor'`;
+  if (!b) return { error: 'This brand is not taking requests right now.' };
+  const fields = parseRequestFields(fd);
+  if ('error' in fields) return fields;
+  const r = await createRequest({ festId: fest.id, brandUserId, brand: b.brand, direction: 'org_to_brand', sentBy: user.id, fields });
+  if (r.error) return { error: r.error };
+  await afterResponse('sponsor-request', () => notifySponsorRequest(r.id!, 'new'));
+  refresh(fest.id);
+  return { ok: true, message: `Request sent to ${b.brand}. You\u2019ll get an email when they answer.` };
+}
+
+/** Accept, decline or withdraw — as the fest. Who may do what is checked in decideRequest. */
+export async function orgDecide(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { user, fest } = await ownFest(fd);
+  const id = s(fd, 'id');
+  const what = s(fd, 'do') as Decision;
+  if (!isUuid(id) || !['accept', 'decline', 'withdraw'].includes(what)) return { error: 'Request not found.' };
+  if (!(await requestsReady())) return { error: REQUESTS_MISSING };
+  const r = await decideRequest(user, 'org', id, what, s(fd, 'reply'));
+  if (r.ok && what !== 'withdraw') await afterResponse('sponsor-request', () => notifySponsorRequest(id, what === 'accept' ? 'accepted' : 'declined'));
+  // On an error (e.g. "already answered" from a second tab) keep the card as it is so the message stays visible
+  if (r.ok) refresh(r.festId ?? fest.id);
+  return { ok: r.ok, error: r.error, message: r.message };
 }
 
 // ─── Payments: zero-fee bank UPI ──────────────────────────

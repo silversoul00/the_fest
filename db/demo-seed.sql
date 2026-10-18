@@ -12,7 +12,7 @@ declare
   lasts text[] := array['Rao','Sharma','Iyer','Reddy','Nair','Gowda','Menon','Kulkarni','Hegde','Shetty','Patil','Bhat'];
   org1 uuid; org2 uuid; stu uuid; vol uuid; adm uuid;
   f_neon uuid; f_hack uuid; f_kalaa uuid; f_comm uuid; f_beats uuid; f_goal uuid;
-  s1 uuid; s2 uuid;
+  s1 uuid; s2 uuid; volt uuid; chai uuid; chai_s uuid;
   d0 date := (now() at time zone 'Asia/Kolkata')::date;
 begin
   if exists (select 1 from fests) then raise exception 'Database already has fests — demo seed is only for an empty preview database'; end if;
@@ -188,4 +188,18 @@ begin
   from (select id, name, email, college, row_number() over (order by email) as r from users where email like 'attendee%') u
   join sponsor_visits v on v.sponsor_id = s1 and v.user_id = u.id
   where r <= 10;
+  -- Sponsorship requests (needs v2.6): two listed brands, two fests open to brands, requests both ways in each status.
+  select id into volt from users where email = 'sponsor@thefest.in';
+  insert into users (email, password_hash, name, role, email_verified_at) values ('brand@seed.thefest.in', pw, 'Kabir Chai Point', 'sponsor', now()) returning id into chai;
+  insert into brand_profiles (user_id, brand, category, budget_min_paise, budget_max_paise, cities, about, listed) values
+    (volt, 'Volt Energy', 'food', 5000000, 50000000, '{Bengaluru,Mysuru}', 'Energy drinks for students who stay up for the pro night.', true),
+    (chai, 'Chai Point Express', 'food', 2500000, 15000000, '{Bengaluru}', 'Chai and snack kiosks at campus events.', true);
+  update fests set open_to_sponsors = true where id in (f_neon, f_kalaa);
+  select id into chai_s from sponsors where email = 'brand@seed.thefest.in' and fest_id = f_neon;
+  insert into sponsor_requests (fest_id, brand_user_id, direction, brand, tier, amount_paise, deliverables, message, status, reply, sent_by, decided_by, sponsor_id, created_at, decided_at) values
+    (f_kalaa, volt, 'brand_to_org', 'Volt Energy', 'Powered by', 12000000, 'Stall near the main stage, 4 emcee mentions, logo on passes', 'We would love to power the folk-fusion night.', 'sent', null, volt, null, null, now() - interval '3 days', null),
+    (f_comm, volt, 'org_to_brand', 'Volt Energy', 'Associate', 6000000, 'Stall at the quad, logo on the B-plan stage', '800 delegates from colleges across Bengaluru.', 'sent', null, org2, null, null, now() - interval '3 days', null),
+    (f_neon, chai, 'brand_to_org', 'Chai Point Express', 'Associate', 10000000, 'Two kiosks, one stage mention per night', null, 'accepted', null, chai, org1, chai_s, now() - interval '3 days', now() - interval '1 day'),
+    (f_hack, chai, 'org_to_brand', 'Chai Point Express', 'Partner', 3000000, null, '36 hours of hacking needs a lot of chai!', 'declined', 'Our budget for this quarter is used up.', org1, chai, null, now() - interval '3 days', now() - interval '1 day'),
+    (f_kalaa, chai, 'brand_to_org', 'Chai Point Express', 'Partner', 2500000, null, null, 'withdrawn', null, chai, chai, null, now() - interval '3 days', now() - interval '1 day');
 end $$;

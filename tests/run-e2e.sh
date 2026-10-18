@@ -71,4 +71,8 @@ python3 tests/smartqr.py
 # Sponsor leads + ROI report (2026-10-18): opt-in sharing at the booth (18+), stop sharing, sponsor leads/CSV/withdrawn,
 # report numbers, access, organizer counts only, print, 390px, old database without v2.5 (:3007)
 python3 tests/sponsor_leads.py
+# Sponsorship requests (2026-10-18): brand profile + directory, Find fests + media kit (real numbers, no personal data),
+# requests both ways, accept → sponsors row (double-click safe), limits, side checks, contacts after accept,
+# co-organizers, 390px, old database without v2.6 (:3008)
+python3 tests/sponsor_requests.py
 echo "✓ Release check passed"

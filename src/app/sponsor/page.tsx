@@ -5,7 +5,7 @@ import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { dateRange, num, rupees } from '@/lib/format';
 import { Empty, FestStatus } from '@/components/ui';
-import { logout } from '../(auth)/actions';
+import { SponsorShell } from '@/components/SponsorShell';
 
 export const metadata = { title: 'Sponsor dashboard' };
 
@@ -28,17 +28,7 @@ export default async function SponsorHome() {
   const totals = rows.reduce((a, r) => ({ spend: a.spend + r.amount_paise, foot: a.foot + r.footfall, visits: a.visits + r.visits }), { spend: 0, foot: 0, visits: 0 });
 
   return (
-    <>
-      <header className="topbar">
-        <div className="wrap topbar-in">
-          <span className="logo">THE FEST</span>
-          <div className="row g12">
-            <span className="small soft hide-sm">{user.name}</span>
-            <form action={logout}><button className="btn sm outline" type="submit">Log out</button></form>
-          </div>
-        </div>
-      </header>
-      <main className="wrap page stack g16" style={{ ['--accent' as string]: 'var(--blue)' }}>
+    <SponsorShell user={user} cur="home">
         <div>
           <span className="kicker" style={{ color: 'var(--blue)' }}>Sponsor dashboard</span>
           <h1 className="h2 mt8">Your <span className="c-blue">sponsorships</span></h1>
@@ -73,7 +63,6 @@ export default async function SponsorHome() {
             </div>
           </>
         )}
-      </main>
-    </>
+    </SponsorShell>
   );
 }

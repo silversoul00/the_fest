@@ -332,3 +332,8 @@ img, svg { display: block; max-width: 100%; }
 @media (min-width: 860px) { .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .an-grid { display: grid; gap: 16px; }
 @media (min-width: 1000px) { .an-grid.two { grid-template-columns: 1fr 1fr; } }
+
+/* Sponsorship requests (v2.6) */
+summary.btn { list-style: none; } summary.btn::-webkit-details-marker { display: none; }
+.sp-nav { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.sp-nav .chip { min-height: 44px; display: inline-flex; align-items: center; flex: none; }

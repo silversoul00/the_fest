@@ -6,9 +6,11 @@ import { Empty, Stat } from '@/components/ui';
 import Link from 'next/link';
 import { sql } from '@/lib/db';
 import { leadsReady } from '@/lib/sponsor-leads';
-import { addSponsor, removeSponsor } from '../../actions';
+import { addSponsor, orgDecide, removeSponsor, sendBrandRequest, setOpenToSponsors } from '../../actions';
+import { RequestCard, RequestFields } from '@/components/RequestCard';
+import { BRAND_CATEGORIES, REQUESTS_MISSING, festRequests, requestsReady } from '@/lib/sponsor-requests';
 
-export default async function Sponsors({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ remove?: string; err?: string; removed?: string }> }) {
+export default async function Sponsors({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ remove?: string; err?: string; removed?: string; to?: string; bcat?: string; bcity?: string }> }) {
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
   const sp = await searchParams;
@@ -32,6 +34,26 @@ export default async function Sponsors({ params, searchParams }: { params: Promi
   const leadsBy = new Map(leadRows.map((r) => [r.sponsor_id, r]));
   const removing = sponsors.find((s) => s.id === sp.remove);
   const base = `/organizer/${fest.id}/sponsors`;
+
+  // Sponsorship requests (v2.6): brands see only listed profile fields — never emails — until a request is accepted.
+  const ready = await requestsReady();
+  const bcat = sp.bcat && sp.bcat in BRAND_CATEGORIES ? sp.bcat : '';
+  const bcity = (sp.bcity ?? '').trim().slice(0, 40);
+  type BrandRow = { user_id: string; brand: string; category: string; budget_min_paise: number; budget_max_paise: number; cities: string[]; about: string | null };
+  const [requests, brands, [open]] = ready ? await Promise.all([
+    festRequests(fest.id),
+    sql<BrandRow[]>`
+      select p.user_id, p.brand, p.category, p.budget_min_paise, p.budget_max_paise, p.cities, p.about
+      from brand_profiles p join users u on u.id = p.user_id
+      where p.listed and u.role = 'sponsor' ${bcat ? sql`and p.category = ${bcat}` : sql``}
+        ${bcity ? sql`and exists (select 1 from unnest(p.cities) c where c ilike ${bcity})` : sql``}
+      order by p.updated_at desc limit 100`,
+    sql<{ open: boolean }[]>`select open_to_sponsors as open from fests where id = ${fest.id}`,
+  ]) : [[], [], [{ open: false }]];
+  const received = requests.filter((r) => r.direction === 'brand_to_org');
+  const sentReqs = requests.filter((r) => r.direction === 'org_to_brand');
+  const target = brands.find((b) => b.user_id === sp.to);
+  const budget = (b: BrandRow) => b.budget_max_paise ? `${rupees(b.budget_min_paise, { compact: true })}–${rupees(b.budget_max_paise, { compact: true })}` : b.budget_min_paise ? `from ${rupees(b.budget_min_paise, { compact: true })}` : 'Budget not given';
 
   return (
     <div className="stack g16">
@@ -89,6 +111,66 @@ export default async function Sponsors({ params, searchParams }: { params: Promi
             </div>
           ))}
         </div>
+      )}
+
+      {!ready ? <div className="alert error">{REQUESTS_MISSING}</div> : (
+        <>
+          <section className="card stack g8" aria-label="Show this fest to brands">
+            <ActionForm action={setOpenToSponsors} className="stack g8">
+              <input type="hidden" name="festId" value={fest.id} />
+              <label className="row g8" style={{ minHeight: 44 }}>
+                <input type="checkbox" name="open" defaultChecked={open.open} /> <span>Show this fest to brands (media kit)</span>
+              </label>
+              <p className="xs muted">Brands then see the fest, dates, tickets sold and college mix in &ldquo;Find fests&rdquo;, and can ask to sponsor. No student names or emails, and not your email until you accept.</p>
+              <Submit className="btn outline block">Save</Submit>
+            </ActionForm>
+            <Link className="btn outline block" href={`/sponsor/fests/${fest.id}`}>Preview the media kit</Link>
+          </section>
+
+          <section className="stack g12" aria-label="Requests">
+            <div className="h3">Requests received ({received.length})</div>
+            {received.length === 0 ? <p className="small muted">No brand has asked yet.</p>
+              : received.map((r) => <RequestCard key={r.id} r={r} side="org" action={orgDecide} festId={fest.id} />)}
+            <div className="h3 mt8">Requests sent ({sentReqs.length})</div>
+            {sentReqs.length === 0 ? <p className="small muted">Pick a brand below and send a request.</p>
+              : sentReqs.map((r) => <RequestCard key={r.id} r={r} side="org" action={orgDecide} festId={fest.id} />)}
+          </section>
+
+          <section className="stack g12" id="brands" aria-label="Find brands">
+            <div className="h3">Find brands</div>
+            <form className="form-row" method="get" action={`${base}#brands`}>
+              <label className="field"><span>Category</span>
+                <select className="select" name="bcat" defaultValue={bcat}><option value="">Any</option>
+                  {Object.entries(BRAND_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+              <label className="field"><span>City</span><input className="input" name="bcity" defaultValue={bcity} placeholder="Bengaluru" /></label>
+              <button className="btn outline" type="submit" style={{ alignSelf: 'flex-end' }}>Filter</button>
+            </form>
+            {target && (
+              <div className="card" id="send" aria-label={`Send a request to ${target.brand}`}>
+                <div className="h3 mb8">Send a request to {target.brand}</div>
+                <ActionForm action={sendBrandRequest} resetOnSuccess>
+                  <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="brandUserId" value={target.user_id} />
+                  <RequestFields deliverablesHint="What you offer (stall, mentions…)" />
+                  <p className="xs muted">{target.brand} sees your fest and college — not your email — until they accept.</p>
+                  <Submit className="btn blue block">Send request</Submit>
+                </ActionForm>
+              </div>
+            )}
+            {brands.length === 0 ? <p className="small muted">No listed brands match.</p> : (
+              <div className="grid-auto">
+                {brands.map((b) => (
+                  <div key={b.user_id} className="card stack g8 brand-card" data-brand={b.user_id} style={{ overflowWrap: 'anywhere' }}>
+                    <div className="h3">{b.brand}</div>
+                    <div className="row g8 wrap-row"><span className="badge gray">{BRAND_CATEGORIES[b.category] ?? b.category}</span><span className="badge green">{budget(b)}</span></div>
+                    {b.cities.length > 0 && <div className="xs muted">{b.cities.join(' · ')}</div>}
+                    {b.about && <div className="small soft">{b.about}</div>}
+                    <Link className="btn outline block" href={`${base}?to=${b.user_id}#send`}>Send request</Link>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
       )}
 
       <div className="card">

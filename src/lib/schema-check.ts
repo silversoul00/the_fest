@@ -21,6 +21,8 @@ export const REQUIRED_TABLES = [
   'perk_redemptions',
   // v2.5 (sponsor leads)
   'sponsor_leads',
+  // v2.6 (sponsorship requests)
+  'brand_profiles', 'sponsor_requests',
 ] as const;
 
 export const REQUIRED_COLUMNS = [
@@ -36,6 +38,7 @@ export const REQUIRED_COLUMNS = [
   'ticket_types.kind', 'ticket_types.lunch_days', 'ticket_types.includes_stay', 'orders.addon_for',
   'fests.qr_epoch',
   'sponsors.lead_offer',
+  'fests.open_to_sponsors',
 ] as const;
 
 /**
