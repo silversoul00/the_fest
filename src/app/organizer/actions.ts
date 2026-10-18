@@ -231,6 +231,24 @@ export async function removeStaff(fd: FormData) {
   refresh(fest.id);
 }
 
+/**
+ * "Phone lost? Reset scanner keys": new ticket QRs seal under a new key epoch, and every scanner of this fest
+ * (volunteers, co-organizers, owner) must log in again. QRs from the previous epoch still open on the new keys;
+ * older ones need the network. Owner or co-organizer.
+ */
+export async function resetScannerKeys(_: ActionState, fd: FormData): Promise<ActionState> {
+  const { fest } = await ownFest(fd);
+  await sql.begin(async (tx) => {
+    await tx`update fests set qr_epoch = qr_epoch % 255 + 1 where id = ${fest.id}`;
+    await tx`delete from sessions s using users u where s.user_id = u.id and s.kind = 'scanner' and (
+               u.email in (select email from fest_staff where fest_id = ${fest.id})
+               or u.email in (select email from fest_members where fest_id = ${fest.id})
+               or u.id = (select organizer_id from fests where id = ${fest.id}))`;
+  });
+  refresh(fest.id);
+  return { ok: true, message: 'Scanner keys reset. Everyone scanning for this fest must log in to the scanner again.' };
+}
+
 // ─── Announcements ────────────────────────────────────────
 export async function postAnnouncement(_: ActionState, fd: FormData): Promise<ActionState> {
   const { fest } = await ownFest(fd);

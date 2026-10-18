@@ -394,3 +394,17 @@ create table if not exists perk_redemptions (
 );
 create index if not exists perk_redemptions_fest_idx on perk_redemptions(fest_id, created_at desc);
 alter table perk_redemptions enable row level security;
+
+-- v2.4 (Oct 2026): Smart QR. qr_epoch picks the scanner keys sealed into new ticket QRs; "Reset scanner keys"
+-- (Volunteers tab, after a lost phone) bumps it. medical_profiles is the student's optional first-aid card (18+ only),
+-- sealed into their ticket QR for first-aid volunteers and the fest's organizers — never shown anywhere else.
+alter table fests add column if not exists qr_epoch smallint not null default 1;
+create table if not exists medical_profiles (
+  user_id          uuid primary key references users(id) on delete cascade,
+  blood_group      text not null check (blood_group in ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown')),
+  allergies        varchar(24) not null default '',
+  emergency_phone  char(10) not null check (emergency_phone ~ '^[0-9]{10}$'),
+  consent_version  text not null,
+  consented_at     timestamptz not null default now()
+);
+alter table medical_profiles enable row level security;

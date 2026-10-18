@@ -22,6 +22,15 @@ const nextConfig = {
         ],
       },
       {
+        // Smart QR public ticket page: never cached, never indexed, never leaks its URL as a referrer
+        source: '/t/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'private, no-store' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'X-Robots-Tag', value: 'noindex' },
+        ],
+      },
+      {
         source: '/sw.js',
         headers: [{ key: 'Cache-Control', value: 'no-cache' }],
       },

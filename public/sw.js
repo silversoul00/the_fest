@@ -2,7 +2,7 @@
 // Caches static assets (fonts, icons, Next.js build chunks) for fast loads.
 // Pages and the API are always fetched live — ticket and scan data must
 // never be stale. If the network is down, pages fall back to /offline.
-const VERSION = 'thefest-v2';
+const VERSION = 'thefest-v3'; // keep in step with OFFLINE_CACHE in src/components/LiveQR.tsx
 const PRECACHE = ['/offline', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

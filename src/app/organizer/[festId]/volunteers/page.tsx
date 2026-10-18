@@ -4,7 +4,7 @@ import { getOwnFest, getStaff } from '@/lib/queries';
 import { initials, time } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty, Stat } from '@/components/ui';
-import { addStaff, removeStaff, toggleStaffCheckin } from '../../actions';
+import { addStaff, removeStaff, resetScannerKeys, toggleStaffCheckin } from '../../actions';
 
 export default async function Volunteers({ params }: { params: Promise<{ festId: string }> }) {
   const user = await requireUser('organizer');
@@ -29,7 +29,7 @@ export default async function Volunteers({ params }: { params: Promise<{ festId:
 
       <div className="card">
         <div className="h3 mb8">Add a volunteer</div>
-        <p className="xs muted mb16">They sign up (any role) with this email, then open <span className="mono">/scan</span> to scan tickets for your fest. Duty “Lunch counter” scans lunch only, “Stay desk” (or “Hostel…”) scans stay only — first scan checks in, next scan checks out; anything else is the gate.</p>
+        <p className="xs muted mb16">They sign up (any role) with this email, then open <span className="mono">/scan</span> to scan tickets for your fest. Duty “Lunch counter” scans lunch only, “Stay desk” (or “Hostel…”) scans stay only — first scan checks in, next scan checks out; “First aid” sees a student’s first-aid card (if they added one) and records nothing; anything else is the gate.</p>
         <ActionForm action={addStaff} resetOnSuccess>
           <input type="hidden" name="festId" value={fest.id} />
           <div className="form-row">
@@ -39,13 +39,22 @@ export default async function Volunteers({ params }: { params: Promise<{ festId:
           <div className="form-row">
             <label className="field"><span>Duty</span>
               <input className="input" name="duty" list="duties" defaultValue="Gate 1" />
-              <datalist id="duties"><option value="Gate 1" /><option value="Gate 2" /><option value="Gate 3" /><option value="Lunch counter" /><option value="Stay desk" /><option value="Registration desk" /><option value="Main stage" /><option value="Hospitality" /></datalist>
+              <datalist id="duties"><option value="Gate 1" /><option value="Gate 2" /><option value="Gate 3" /><option value="Lunch counter" /><option value="Stay desk" /><option value="First aid" /><option value="Registration desk" /><option value="Main stage" /><option value="Hospitality" /></datalist>
             </label>
             <label className="check" style={{ alignSelf: 'end', paddingBottom: 12 }}><input type="checkbox" name="can_scan" defaultChecked /> Can scan tickets</label>
           </div>
           <Submit className="btn">+ Add to team</Submit>
         </ActionForm>
       </div>
+
+      <details className="card" id="reset-keys">
+        <summary className="small" style={{ cursor: 'pointer' }}>Phone lost? Reset scanner keys</summary>
+        <p className="xs muted mt8">Scanner phones keep keys so they work without internet. If a phone is lost, reset the keys: everyone scanning for this fest logs in again, and new ticket QRs use the new keys. Also remove that volunteer from the team below.</p>
+        <ActionForm action={resetScannerKeys} className="form mt8">
+          <input type="hidden" name="festId" value={fest.id} />
+          <Submit className="btn sm danger">Reset scanner keys</Submit>
+        </ActionForm>
+      </details>
 
       {staff.length === 0 ? <Empty icon="👥" title="No volunteers yet" /> : (
         <div className="list">

@@ -19,8 +19,8 @@ function pem(v: string | undefined, name: string) {
 
 let priv: KeyObject | null = null;
 let pub: KeyObject | null = null;
-const privateKey = () => (priv ??= createPrivateKey(pem(process.env.TICKET_PRIVATE_KEY, 'TICKET_PRIVATE_KEY')));
-const publicKey = () =>
+export const privateKey = () => (priv ??= createPrivateKey(pem(process.env.TICKET_PRIVATE_KEY, 'TICKET_PRIVATE_KEY')));
+export const publicKey = () =>
   (pub ??= process.env.TICKET_PUBLIC_KEY
     ? createPublicKey(pem(process.env.TICKET_PUBLIC_KEY, 'TICKET_PUBLIC_KEY'))
     : createPublicKey(privateKey()));

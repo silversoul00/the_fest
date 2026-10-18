@@ -1,6 +1,8 @@
 import 'server-only';
 import { sql } from './db';
 import { verifyTicket } from './ticket-crypto';
+import { verifyTf2, type Live } from './qr2.ts';
+import { isTf2Text } from './qr2-format.ts';
 import { time, todayIST } from './format';
 
 export type Verdict = {
@@ -11,13 +13,15 @@ export type Verdict = {
   code?: string;
   checkedInAt?: string;
   gate?: string | null;
+  live?: Live | null;
 };
 
 /** Which desk a volunteer works: comes from their duty, set by the organizer. */
-export type Counter = 'gate' | 'lunch' | 'stay';
+export type Counter = 'gate' | 'lunch' | 'stay' | 'aid';
 export function counterFor(duty: string | null | undefined): Counter {
   const d = (duty ?? '').trim().toLowerCase();
   if (d.startsWith('lunch')) return 'lunch';
+  if (d.startsWith('first aid') || d.startsWith('first-aid') || d.startsWith('medical')) return 'aid';
   if (d.startsWith('stay') || d.startsWith('hostel')) return 'stay';
   return 'gate';
 }
@@ -33,6 +37,25 @@ async function resolveTicket(opts: { festId: string; scannerId: string; logAs: s
   const fail = async (ticketId: string | null, result: Verdict['result'], detail: string) => {
     if (logAs !== null) await log(festId, ticketId, scannerId, logAs, result, detail);
   };
+  if (opts.payload && isTf2Text(opts.payload)) {
+    // Smart QR (TF2): signature + pathTag; the fest comes from the ticket row
+    const v = verifyTf2(opts.payload);
+    if (!v.ok) {
+      await fail(null, 'invalid', 'Fake or tampered ticket');
+      return { verdict: { result: 'invalid', message: 'Fake or tampered ticket' } };
+    }
+    const [t] = await sql<{ fest_id: string; name: string }[]>`
+      select t.fest_id, f.name from tickets t join fests f on f.id = t.fest_id where t.id = ${v.ticketId}`;
+    if (!t) {
+      await fail(null, 'invalid', 'Ticket not found');
+      return { verdict: { result: 'invalid', message: 'Ticket not found' } };
+    }
+    if (t.fest_id !== festId) {
+      await fail(null, 'wrong_fest', 'Ticket is for another fest');
+      return { verdict: { result: 'wrong_fest', message: `This ticket is for ${t.name}` } };
+    }
+    return { ticketId: v.ticketId };
+  }
   if (opts.payload) {
     const v = verifyTicket(opts.payload);
     if (!v.ok) {
@@ -168,6 +191,29 @@ export async function redeemPerk(opts: { festId: string; scannerId: string; coun
   if ((await claim('stay_out')).length) return { result: 'admitted', message: 'Stay: checked out', ...who };
   const outAt = await usedAt('stay_out');
   return { result: 'duplicate', message: `Already checked out${outAt ? ` at ${time(outAt)}` : ''}`, ...who };
+}
+
+/** "Live" chip for a scanned TF2 QR (live code fresh / old screenshot / static print); null for TF1 or codes. */
+export function liveOf(payload: string | undefined): Live | null {
+  if (!payload || !isTf2Text(payload)) return null;
+  const v = verifyTf2(payload);
+  return v.ok ? v.live : null;
+}
+
+/**
+ * First-aid desk: only says whether the ticket is real and for this fest. Never redeems anything and never
+ * returns medical data — that travels only sealed inside the QR, opened on the first-aid volunteer's phone.
+ */
+export async function aidStatus(opts: { festId: string; scannerId: string; payload?: string; code?: string }): Promise<Verdict> {
+  const r = await resolveTicket({ ...opts, logAs: null });
+  if ('verdict' in r) return r.verdict;
+  const [t] = await sql<{ status: string; holder_name: string; code: string; type: string; checked_in_at: Date | null }[]>`
+    select t.status, t.holder_name, t.code, tt.name as type, t.checked_in_at
+    from tickets t join ticket_types tt on tt.id = t.ticket_type_id where t.id = ${r.ticketId} and t.fest_id = ${opts.festId}`;
+  if (!t) return { result: 'invalid', message: 'Ticket not found' };
+  const who = { holder: t.holder_name, type: t.type, code: t.code };
+  if (t.status === 'void') return { result: 'void', message: 'This ticket was cancelled', ...who };
+  return { result: 'admitted', message: t.checked_in_at ? `Valid ticket · checked in at ${time(t.checked_in_at)}` : 'Valid ticket · not checked in yet', ...who };
 }
 
 /** Scanner header numbers for a lunch/stay desk: today's uses at this fest, and by this volunteer. */

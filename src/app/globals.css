@@ -247,6 +247,7 @@ img, svg { display: block; max-width: 100%; }
 .verdict.admitted { border-color: var(--green); background: rgba(0,229,160,.1); color: var(--green); }
 .verdict.duplicate { border-color: var(--orange); background: rgba(255,92,26,.1); color: var(--orange); }
 .verdict.invalid, .verdict.wrong_fest, .verdict.void { border-color: var(--red); background: rgba(255,45,85,.1); color: var(--red); }
+.verdict.offline { border-color: var(--yellow); background: rgba(255,224,52,.1); color: var(--yellow); }
 .verdict .big { font-family: var(--f-display); font-size: 48px; letter-spacing: .06em; line-height: 1; }
 @keyframes pop { from { transform: scale(.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 

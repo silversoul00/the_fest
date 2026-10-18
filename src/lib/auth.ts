@@ -80,6 +80,14 @@ export const getUser = cache(() => userFromCookie(APP_COOKIE, 'app'));
 /** Current gate-scanner user (memoised per request). */
 export const getScanner = cache(() => userFromCookie(SCAN_COOKIE, 'scanner'));
 
+/** When the current scanner session ends (the scanner's offline keys must not outlive it). */
+export async function scannerSessionExpiry(): Promise<Date | null> {
+  const token = (await cookies()).get(SCAN_COOKIE)?.value;
+  if (!token) return null;
+  const [r] = await sql<{ expires_at: Date }[]>`select expires_at from sessions where token_hash = ${sha256(token)} and kind = 'scanner'`;
+  return r?.expires_at ?? null;
+}
+
 export const PORTAL: Record<Role, string> = {
   student: '/fests',
   organizer: '/organizer',

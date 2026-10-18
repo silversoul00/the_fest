@@ -4,7 +4,9 @@ import QRCode from 'qrcode';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { dateRange, time } from '@/lib/format';
-import { signTicket } from '@/lib/ticket-crypto';
+import { sealTicket, ticketSealData } from '@/lib/qr2';
+import { siteUrlOrNull } from '@/lib/env';
+import { LiveQR } from '@/components/LiveQR';
 import { reportError } from '@/lib/errors';
 import { isUuid } from '@/lib/http';
 import { AutoRefresh } from '@/components/AutoRefresh';
@@ -46,12 +48,18 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
   }
   const canTransfer = t.status === 'valid' && t.allow_transfers && t.fest_status !== 'cancelled' && t.fest_status !== 'ended' && t.ends_on >= todayIST();
 
+  // Smart QR: sealed fresh from the database on every open (new add-ons show up), drawn live on the phone.
   // If the signing key is missing or broken, show the backup code instead of crashing the page.
   let svg = '';
+  let qr: { url: string; liveSecret: string } | null = null;
   try {
-    const payload = signTicket(t.id, t.fest_id);
-    svg = await QRCode.toString(payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#080808', light: '#F5F0E8' } });
+    const data = await ticketSealData(sql, t.id);
+    if (data) {
+      qr = sealTicket(siteUrlOrNull() ?? 'https://thefest.in', data);
+      svg = await QRCode.toString(qr.url, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#080808', light: '#F5F0E8' } });
+    }
   } catch (e) {
+    qr = null;
     await reportError(e, 'ticket QR');
   }
   const used = t.status === 'used';
@@ -97,8 +105,8 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
         </div>
         <div className="ticket-perf" />
         <div className="ticket-qr">
-          {svg
-            ? <div dangerouslySetInnerHTML={{ __html: svg }} aria-label="Ticket QR code" role="img" />
+          {qr && svg
+            ? <LiveQR ticketId={t.id} url={qr.url} secret={qr.liveSecret} initialSvg={svg} save={{ fest: t.fest_name, type: t.type_name, date: dateRange(t.starts_on, t.ends_on) }} />
             : <div className="alert info" role="status">The QR code can’t be shown right now. Your ticket is safe — show the code below at the gate, or try again in a few minutes.</div>}
           <div className="ticket-code">{t.code}</div>
           <div className="xs" style={{ color: 'rgba(8,8,8,.55)', textAlign: 'center' }}>
@@ -109,7 +117,7 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
       </div>
 
       <p className="xs muted" style={{ textAlign: 'center' }}>
-        This QR is digitally signed and works once. Screenshots work too — but don&apos;t share it; whoever scans first gets in.
+        This QR is digitally signed and works once. Show it live from this screen — screenshots still work but get flagged at the gate. Don&apos;t share it; whoever scans first gets in.
       </p>
       {(lunchDays.length > 0 || hasStay) && (
         <div className="card stack g8" aria-label="Lunch and stay">

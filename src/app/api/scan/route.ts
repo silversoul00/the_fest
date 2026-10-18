@@ -1,10 +1,10 @@
 import { getScanner } from '@/lib/auth';
 import { body, fail, isUuid, json, sameOrigin } from '@/lib/http';
 import { scannableFests } from '@/lib/queries';
-import { checkIn, counterFor, perkCounts, redeemPerk, type Counter } from '@/lib/scan';
+import { aidStatus, checkIn, counterFor, liveOf, perkCounts, redeemPerk, type Counter } from '@/lib/scan';
 import { sql } from '@/lib/db';
 
-const COUNTERS: Counter[] = ['gate', 'lunch', 'stay'];
+const COUNTERS: Counter[] = ['gate', 'lunch', 'stay', 'aid'];
 
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return fail('Bad origin', 403);
@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   const b = await body<{ festId?: string; gate?: string; counter?: string; payload?: string; code?: string }>(req);
   if (!b || !isUuid(b.festId)) return fail('Pick a fest first.');
   if (!b.payload && !b.code) return fail('Nothing scanned.');
-  if ((b.payload?.length ?? 0) > 400 || (b.code?.length ?? 0) > 40) return fail('Not a THE FEST ticket.');
+  if ((b.payload?.length ?? 0) > 600 || (b.code?.length ?? 0) > 40) return fail('Not a THE FEST ticket.');
 
   const rows = (await scannableFests(scanner)).filter((f) => f.id === b.festId);
   if (!rows.length) return fail('You are not on this fest’s gate team.', 403);
@@ -26,9 +26,14 @@ export async function POST(req: Request) {
     ? (COUNTERS.includes(b.counter as Counter) ? (b.counter as Counter) : 'gate')
     : counterFor(rows[0].duty);
 
+  const live = liveOf(b.payload);
+  if (counter === 'aid') {
+    const verdict = await aidStatus({ festId: b.festId, scannerId: scanner.id, payload: b.payload, code: b.code });
+    return json({ ...verdict, counter, live });
+  }
   if (counter !== 'gate') {
     const verdict = await redeemPerk({ festId: b.festId, scannerId: scanner.id, counter, payload: b.payload, code: b.code });
-    return json({ ...verdict, counter, counts: await perkCounts(b.festId, scanner.id, counter) });
+    return json({ ...verdict, counter, live, counts: await perkCounts(b.festId, scanner.id, counter) });
   }
 
   const gate = (b.gate || 'Gate').slice(0, 40);
@@ -38,5 +43,5 @@ export async function POST(req: Request) {
     select (select count(*) from tickets where fest_id = ${b.festId} and status = 'used')::int inn,
            (select count(*) from tickets where fest_id = ${b.festId} and status <> 'void')::int total,
            (select count(*) from scans where fest_id = ${b.festId} and scanned_by = ${scanner.id} and result = 'admitted')::int mine`;
-  return json({ ...verdict, counter, counts: c });
+  return json({ ...verdict, counter, live, counts: c });
 }
