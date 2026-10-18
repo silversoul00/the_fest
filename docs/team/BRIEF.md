@@ -87,6 +87,10 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   databases once tests pass — "Yes, both". Fests are **hidden from brands until the organizer switches on**
   "Show this fest to brands". Contacts hidden until a request is accepted; money settled off-platform in v1.
 
+## Planning only (Oct 18, 2026)
+- Harshith: "from here on out it's just planning … don't start to build anything until I say so — just pure planning,
+  because I have no credit left for usage." No building, no agent runs, no pushes until he explicitly says to build.
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.
