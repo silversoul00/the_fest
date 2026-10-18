@@ -101,7 +101,7 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
         }
         let r: Response;
         try {
-          r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId: q.festId, gate: q.gate, counter: q.counter, payload: q.payload }) });
+          r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId: q.festId, gate: q.gate, counter: q.counter, payload: q.payload }), signal: AbortSignal.timeout(8000) });
         } catch { break; }
         if (r.status === 401) { await locked(); break; }
         const isJson = (r.headers.get('content-type') ?? '').includes('application/json');
@@ -320,7 +320,7 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
         <div className="row g8" style={{ alignItems: 'center' }}>
           <div className="grow display" style={{ fontSize: 30, color: counter === 'gate' ? 'var(--green)' : 'var(--yellow)' }} data-counter={counter}>{COUNTER_LABEL[counter]}</div>
           {canPick && (
-            <select className="select" style={{ width: 150 }} value={counter} aria-label="Counter"
+            <select className="select" style={{ minWidth: 150 }} value={counter} aria-label="Counter"
               onChange={(e) => router.replace(`/scan?fest=${festId}&counter=${e.target.value}`)}>
               {(['gate', 'lunch', 'stay'] as const).map((c) => <option key={c} value={c}>{COUNTER_LABEL[c]}</option>)}
             </select>

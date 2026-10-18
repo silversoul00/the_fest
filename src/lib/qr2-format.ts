@@ -19,7 +19,7 @@ export const NONCE_LEN = 12;
 export const SIG_LEN = 64;
 export const TAG_LEN = 4;
 export const LIVE_STEP_SECONDS = 30;
-export const NAME_MAX = 20;      // bytes (UTF-8)
+export const NAME_MAX = 26;      // bytes (UTF-8) — fits one Kannada/Hindi word (3 bytes per letter)
 export const TYPE_MAX = 12;      // bytes
 
 // ─── base64url (canonical: a string that doesn't re-encode to itself is rejected) ───
@@ -53,15 +53,25 @@ export function concat(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** UTF-8 bytes of `s`, cut to at most `max` bytes without splitting a character. */
-export function utf8Max(s: string, max: number): Uint8Array {
-  let out: Uint8Array = new Uint8Array(0);
-  for (const ch of s) {
-    const next = concat(out, utf8(ch));
-    if (next.length > max) break;
-    out = next;
+/**
+ * UTF-8 bytes of `s`, at most `max` bytes. Cuts only between whole letters (grapheme clusters, so a Kannada
+ * or Hindi vowel sign is never split off its letter) and prefers ending at a word; a cut name ends in "…".
+ */
+export function utf8Max(s: string, max: number, atWord = true): Uint8Array {
+  const full = utf8(s);
+  if (full.length <= max) return full;
+  const seg = typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s), (x) => x.segment)
+    : Array.from(s);
+  const room = max - 3; // leave space for "…"
+  let out = '', lastSpace = -1;
+  for (const g of seg) {
+    if (utf8(out + g).length > room) break;
+    if (/\s/.test(g)) lastSpace = out.length;
+    out += g;
   }
-  return out;
+  if (atWord && lastSpace > 0) out = out.slice(0, lastSpace);
+  return utf8(out.trimEnd() + '…');
 }
 
 export function uuidBytes(u: string): Uint8Array {
@@ -131,7 +141,7 @@ function bcd(phone: string): Uint8Array {
 const unbcd = (b: Uint8Array) => Array.from(b, (x) => `${x >> 4}${x & 15}`).join('');
 
 export type GateData = { liveSecret: Uint8Array; name: string; type: string };
-export const encGate = (g: GateData) => concat(g.liveSecret.slice(0, 8), utf8Max(g.name, NAME_MAX), Uint8Array.of(0x1f), utf8Max(g.type, TYPE_MAX));
+export const encGate = (g: GateData) => concat(g.liveSecret.slice(0, 8), utf8Max(g.name, NAME_MAX), Uint8Array.of(0x1f), utf8Max(g.type, TYPE_MAX, false));
 export function decGate(b: Uint8Array): GateData | null {
   const sep = b.indexOf(0x1f, 8);
   if (b.length < 9 || sep < 0) return null;

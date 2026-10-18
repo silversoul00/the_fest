@@ -28,9 +28,9 @@ export default async function PublicTicket({ params }: { params: Promise<{ p: st
 
   return (
     <main className="auth-shell">
-      <div className="stack g16 narrow" style={{ width: '100%' }}>
+      <div className="stack g16 narrow" style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}>
         <div className="logo" style={{ textAlign: 'center' }}>THE FEST</div>
-        <div className="card stack g12">
+        <div className="card stack g12" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
           <div className="label" style={{ color: 'var(--orange)' }}>{t.college} · {t.city}</div>
           <h1 className="display" style={{ fontSize: 36, margin: 0 }}>{t.fest}</h1>
           <div className="small soft">📅 {dateRange(t.starts_on, t.ends_on)}</div>
@@ -43,7 +43,7 @@ export default async function PublicTicket({ params }: { params: Promise<{ p: st
             <span className="xs muted">✓ Verified by THE FEST</span>
           </div>
         </div>
-        <Link href="/tickets" className="btn outline block">This is your ticket? Open it in THE FEST</Link>
+        <Link href="/tickets" className="btn outline block" style={{ whiteSpace: 'normal', textAlign: 'center' }}>This is your ticket? Open it in THE FEST</Link>
       </div>
     </main>
   );

@@ -39,10 +39,17 @@ const long = await withLive(sealTicket(host40, worst).url);
 const lv = QRCode.create(long, { errorCorrectionLevel: 'M' }).version;
 check('worst case ≤ 13 with a 40-char site host', lv <= 13, `${long.length} chars, v${lv}`);
 
+// Names are cut only between whole letters and at a word if possible (Kannada/Hindi letters are 3 bytes)
+{
+  const { utf8Max, fromUtf8, NAME_MAX } = await import('../src/lib/qr2-format.ts');
+  const kn = fromUtf8(utf8Max('ಅಭಿಷೇಕ್ ವೆಂಕಟರಾಮನ್ ಅಯ್ಯರ್ हर्षित', NAME_MAX));
+  check('Kannada first name kept whole', kn === 'ಅಭಿಷೇಕ್…', kn);
+  check('short names unchanged', fromUtf8(utf8Max('Arjun Sharma', NAME_MAX)) === 'Arjun Sharma');
+}
 // Round trip with every key (organizer)
 const all = await bundleFor(festId, ROLES);
 const o = await openTicket(big, all);
-check('organizer opens all sections', o.kind === 'ok' && o.gate?.name === 'Abcdefghijklmnopqrst' && o.gate?.type === 'Workshop Bun'
+check('organizer opens all sections', o.kind === 'ok' && o.gate?.name === 'Abcdefghijklmnopqrstuvwxyz' && o.gate?.type === 'Workshop…'
   && o.stay === true && o.lunch === 0b1000000000000101 && o.org === '9845012345' && o.live === 'live' && !('aid' in o), JSON.stringify(o));
 const sv = verifyTf2(big);
 check('server verifies TF2 + live', sv.ok && sv.ticketId === ticketId && sv.live === 'live');
