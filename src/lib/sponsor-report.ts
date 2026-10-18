@@ -21,7 +21,8 @@ export type SponsorReport = {
 export async function loadSponsorReport(sponsorId: string): Promise<SponsorReport | null> {
   const [s] = await sql<{ id: string; fest_id: string; brand: string; tier: string; amount_paise: number; fest_name: string; college: string; city: string; starts_on: string; ends_on: string; status: string; sample: boolean }[]>`
     select s.id, s.fest_id, s.brand, s.tier, s.amount_paise, f.name as fest_name, f.college, f.city, f.starts_on, f.ends_on, f.status,
-           (s.email ilike '%@thefest.in' or s.email ilike '%@seed.thefest.in' or o.email ilike '%@thefest.in' or o.email ilike '%@seed.thefest.in') as sample
+           -- SAMPLE only for the seeded demo fests (demo organizers), never for a real fest run from a staff account
+           (o.email ilike '%@seed.thefest.in' or lower(o.email) in ('organizer@thefest.in', 'organizer2@thefest.in')) as sample
     from sponsors s join fests f on f.id = s.fest_id join users o on o.id = f.organizer_id
     where s.id = ${sponsorId}`;
   if (!s) return null;

@@ -174,15 +174,17 @@ begin
     (f_neon, 'brand@seed.thefest.in', 'Chai Point Express', 'Associate', 10000000, encode(gen_random_bytes(9), 'hex')),
     (f_neon, 'brand2@seed.thefest.in', 'PixelPhone', 'Partner', 7500000, encode(gen_random_bytes(9), 'hex'));
   insert into sponsor_visits (sponsor_id, user_id, created_at)
-  select s1, id, (d0::timestamp + make_interval(hours => 10 + (r * 7 % 9)::int, mins => (r * 23 % 60)::int)) at time zone 'Asia/Kolkata'
-  from (select id, row_number() over (order by email) as r from users where email like 'attendee%') u where r <= 74;
+  -- never in the future: a time later than now moves to yesterday (fest day 1)
+  select s1, id, case when t < now() - interval '5 minutes' then t else t - interval '1 day' end
+  from (select id, (d0::timestamp + make_interval(hours => 10 + (r * 7 % 9)::int, mins => (r * 23 % 60)::int)) at time zone 'Asia/Kolkata' as t
+        from (select id, row_number() over (order by email) as r from users where email like 'attendee%') u where r <= 74) x;
   insert into sponsor_visits (sponsor_id, user_id)
   select s2, id from (select id, row_number() over (order by email) as r from users where email like 'attendee%') u where r <= 12;
   -- Sample leads (needs v2.5): 10 booth visitors chose to share with Volt Energy at Neon Utsav; one later stopped sharing.
   insert into sponsor_leads (sponsor_id, user_id, name, email, college, course_year, notice_version, shared_at, withdrawn_at)
   select s1, u.id, case when r < 10 then u.name end, u.email, case when r < 10 then u.college end,
          case when r < 10 then (array['B.E. CSE, 3rd year','B.Com, 2nd year','B.Des, final year',null,'MBA, 1st year'])[1 + (r % 5)::int] end,
-         'lead-v1', v.created_at + interval '1 minute', case when r = 10 then v.created_at + interval '2 hours' end
+         'lead-v1', least(v.created_at + interval '1 minute', now()), case when r = 10 then least(v.created_at + interval '2 hours', now()) end
   from (select id, name, email, college, row_number() over (order by email) as r from users where email like 'attendee%') u
   join sponsor_visits v on v.sponsor_id = s1 and v.user_id = u.id
   where r <= 10;

@@ -31,8 +31,9 @@ export default async function SponsorDetail({ params }: { params: Promise<{ id: 
              (select count(*) from sponsor_visits v where v.sponsor_id = ${s.id} and exists
                 (select 1 from tickets t where t.fest_id = ${s.fest_id} and t.user_id = v.user_id and t.status = 'used'))::int visits,
              ${withLeads ? sql`(select count(*) from sponsor_leads where sponsor_id = ${s.id} and withdrawn_at is null)::int` : sql`0`} leads,
-             (select count(*) from sponsor_visits where sponsor_id = ${s.id}
-                and (created_at at time zone 'Asia/Kolkata')::date = (now() at time zone 'Asia/Kolkata')::date)::int visits_today`,
+             (select count(*) from sponsor_visits v where v.sponsor_id = ${s.id}
+                and (v.created_at at time zone 'Asia/Kolkata')::date = (now() at time zone 'Asia/Kolkata')::date and exists
+                (select 1 from tickets t where t.fest_id = ${s.fest_id} and t.user_id = v.user_id and t.status = 'used'))::int visits_today`,
     // Audience: colleges of checked-in attendees (aggregate only — no personal data shared with sponsors)
     // (groups under 5 are merged into "Other")
     sql<{ college: string | null; n: number }[]>`
@@ -40,8 +41,10 @@ export default async function SponsorDetail({ params }: { params: Promise<{ id: 
       from (select distinct user_id from tickets where fest_id = ${s.fest_id} and status = 'used') t
       join users u on u.id = t.user_id group by 1`,
     sql<{ h: number; n: number }[]>`
-      select extract(hour from created_at at time zone 'Asia/Kolkata')::int h, count(*)::int n
-      from sponsor_visits where sponsor_id = ${s.id} group by 1 order by 1`,
+      select extract(hour from v.created_at at time zone 'Asia/Kolkata')::int h, count(*)::int n
+      from sponsor_visits v where v.sponsor_id = ${s.id} and exists
+        (select 1 from tickets t where t.fest_id = ${s.fest_id} and t.user_id = v.user_id and t.status = 'used')
+      group by 1 order by 1`,
     // Leads: name / college / course only on screen; email and phone only in the CSV
     withLeads ? sql<{ id: string; name: string | null; college: string | null; course_year: string | null; shared_at: Date }[]>`
       select id::text, name, college, course_year, shared_at from sponsor_leads
@@ -80,7 +83,7 @@ export default async function SponsorDetail({ params }: { params: Promise<{ id: 
       <div className="grid-2 grid-3">
         <Stat label="Ticket holders" value={num(m.attendees)} sub="your potential reach" color="var(--yellow)" />
         <Stat label="Verified footfall" value={num(m.footfall)} sub="scanned in at the gates" color="var(--green)" />
-        <Stat label="Booth visits (verified)" value={num(m.visits)} sub={`${num(m.visits_all)} incl. unverified · ${num(m.visits_today)} today · ${conv}% of footfall`} color="var(--blue)" />
+        <Stat label="Booth visits (verified)" value={num(m.visits)} sub={`${num(m.visits_all)} in total (${num(m.visits_all - m.visits)} unverified) · ${num(m.visits_today)} verified today · ${conv}% of footfall`} color="var(--blue)" />
         <Stat label="Cost per visit" value={m.visits ? rupees(Math.round(s.amount_paise / m.visits)) : '—'} sub={`deal ${rupees(s.amount_paise, { compact: true })}`} color="var(--orange)" />
         <Stat label="Leads" value={withLeads ? num(m.leads) : '—'} sub="students who chose to share" color="var(--green)" />
         <Stat label="Cost per lead" value={m.leads ? rupees(Math.round(s.amount_paise / m.leads)) : '—'} color="var(--orange)" />
@@ -88,7 +91,7 @@ export default async function SponsorDetail({ params }: { params: Promise<{ id: 
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))' }}>
         <div className="card">
-          <div className="card-head"><span className="label">Booth visits by hour</span></div>
+          <div className="card-head"><span className="label">Verified booth visits by hour</span></div>
           <div className="bars">
             {hours.map((h) => (
               <div key={h} className="col" title={`${h}:00 — ${byH.get(h) ?? 0}`}>
@@ -122,8 +125,8 @@ export default async function SponsorDetail({ params }: { params: Promise<{ id: 
                 {leads.map((l) => (
                   <div key={l.id} className="li">
                     <div className="grow" style={{ minWidth: 0 }}>
-                      <div className="truncate">{l.name}</div>
-                      <div className="xs muted truncate">{[l.college, l.course_year].filter(Boolean).join(' · ') || '—'}</div>
+                      <div style={{ overflowWrap: 'anywhere' }}>{l.name}</div>
+                      <div className="xs muted lead-meta" style={{ overflowWrap: 'anywhere' }}>{[l.college, l.course_year].filter(Boolean).join(' · ') || '—'}</div>
                     </div>
                     <span className="xs muted mono">{ist(l.shared_at)}</span>
                   </div>
@@ -150,7 +153,7 @@ export default async function SponsorDetail({ params }: { params: Promise<{ id: 
             <span className="label">What students get for sharing (optional)</span>
             <ActionForm action={saveLeadOffer} className="stack g12">
               <input type="hidden" name="id" value={s.id} />
-              <input className="input" name="lead_offer" maxLength={OFFER_MAX} defaultValue={offer?.lead_offer ?? ''} placeholder="e.g. Free energy drink + 20% off coupon" aria-label="What students get for sharing" />
+              <input className="input" name="lead_offer" maxLength={OFFER_MAX} defaultValue={offer?.lead_offer ?? ''} placeholder="e.g. Free drink + 20% off" aria-label="What students get for sharing" />
               <Submit className="btn outline block">Save</Submit>
             </ActionForm>
           </section>

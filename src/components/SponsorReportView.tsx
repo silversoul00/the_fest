@@ -71,7 +71,7 @@ export function SponsorReportView({ r, generatedAt }: { r: SponsorReport; genera
         <div className="rp-grid">
           <Fig label="Ticket holders" value={num(r.attendees)} />
           <Fig label="Verified footfall" value={num(r.footfall)} sub="scanned in at the gates" />
-          <Fig label="Booth visits (verified)" value={num(r.visits)} sub={`${num(r.visitsAll)} including unverified`} />
+          <Fig label="Booth visits (verified)" value={num(r.visits)} sub={`${num(r.visitsAll)} in total (${num(r.visitsAll - r.visits)} unverified)`} />
           <Fig label="Leads" value={r.leads === null ? '—' : num(r.leads)} sub="students who chose to share" />
           <Fig label="Deal" value={rupees(r.amount_paise)} />
           <Fig label="Cost per verified attendee" value={money(perHead(r.amount_paise, r.footfall))} />
@@ -94,7 +94,7 @@ export function SponsorReportView({ r, generatedAt }: { r: SponsorReport; genera
         <h2>Booth</h2>
         <div className="rp-grid mb16">
           <Fig label="Visit rate" value={percent(pct(r.visits, r.footfall))} sub="verified visits ÷ footfall" />
-          <Fig label="Lead rate" value={r.leads === null ? '—' : percent(pct(r.leads, r.visits))} sub="leads ÷ verified visits" />
+          <Fig label="Lead rate" value={r.leads === null ? '—' : percent(pct(r.leads, r.visitsAll))} sub="leads ÷ all booth visits" />
         </div>
         {r.visitHours.length === 0 ? <p className="small muted">No verified booth visits yet.</p> : (
           <Bars rows={r.visitHours.map((x) => ({ label: hourLabel(x.h), n: x.n }))} />
@@ -113,7 +113,9 @@ export function SponsorReportView({ r, generatedAt }: { r: SponsorReport; genera
           <li><b>Ticket holders:</b> tickets issued for the fest and not cancelled.</li>
           <li><b>Verified footfall:</b> tickets scanned in at the gate by fest volunteers. Each ticket counts once.</li>
           <li><b>Booth visits (verified):</b> students who scanned the booth QR and also hold a gate-scanned ticket for this fest. Each student counts once.</li>
+          <li><b>Booth visits (total):</b> everyone who scanned the booth QR, including students whose ticket wasn&apos;t scanned at the gate.</li>
           <li><b>Leads:</b> students who ticked &ldquo;I am 18 or older&rdquo; and chose to share their contact at the booth, minus anyone who later stopped sharing.</li>
+          <li><b>Visit rate:</b> verified booth visits ÷ verified footfall. <b>Lead rate:</b> leads ÷ all booth visits (every lead visited the booth, so it can&apos;t pass 100%).</li>
           <li><b>Costs:</b> the deal amount divided by each count. &ldquo;—&rdquo; means nothing to divide by yet.</li>
           <li>All times are India time (IST). Nothing here is an estimate.</li>
         </ul>

@@ -7,7 +7,9 @@ export function rupees(paise: number, opts: { compact?: boolean } = {}): string 
     if (r >= 1e5) return '₹' + trim(r / 1e5) + 'L';
     if (r >= 1e3) return '₹' + trim(r / 1e3) + 'k';
   }
-  return '₹' + r.toLocaleString('en-IN', { maximumFractionDigits: r % 1 ? 2 : 0 });
+  // Whole rupees show no decimals; otherwise always two (₹6,024.10, not ₹6,024.1).
+  const d = Number.isInteger(Math.round(r * 100) / 100) ? 0 : 2;
+  return '₹' + r.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
 const trim = (n: number) => (Math.round(n * 10) / 10).toString();
 

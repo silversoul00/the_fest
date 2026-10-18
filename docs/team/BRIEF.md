@@ -87,6 +87,16 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 - Password reset, email confirmation, ticket transfer, co-organizers, policy pages (drafts).
 - **Organizer analytics** tab — Harshith chose organizer analytics first, **refreshed when the page opens (not live)**.
 
+## Sponsor leads (Oct 18, 2026)
+- The organizer types the sponsor's login email when adding a sponsor; trusting that is OK for v1 (no brand-side
+  confirmation of sponsor emails yet).
+- The organizer's copy of the sponsor report shows the deal amount and cost figures: yes.
+- Harshith approved adding v2.5 `sponsor_leads` (+ `sponsors.lead_offer`) to **both** Supabase databases (production
+  `thefest` and `thefest-preview`) once tests pass: "Yes, both".
+- Built rules from review 1: a sponsor that has any leads (even withdrawn) can't be removed; lead rate = leads ÷ all
+  booth visits; the SAMPLE badge shows only on the seeded demo fests (organizer@ / organizer2@thefest.in or
+  @seed.thefest.in organizers).
+
 ## Open decisions (waiting for Harshith)
 1. Commission: ₹15 flat, or ~5% with ₹8 minimum / ₹30 maximum?
 2. Add `RESEND_API_KEY` and `ADMIN_EMAILS` in Vercel.

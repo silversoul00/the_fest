@@ -22,7 +22,8 @@ SECRET_BITS = ['9845012345']  # holder phone (organizer section only)
 FID = q("select id from fests where slug='neon-utsav'")
 def pick(type_name, n, extra=''):
     return q(f"select t.id from tickets t join ticket_types tt on tt.id=t.ticket_type_id where t.fest_id='{FID}' and tt.name='{type_name}' "
-             f"and t.status='valid' and t.holder_name not like '% (%/%)' and not exists (select 1 from perk_redemptions p where p.ticket_id=t.id) {extra} "
+             f"and t.status='valid' and t.holder_name not like '% (%/%)' and not exists (select 1 from perk_redemptions p where p.ticket_id=t.id) "
+             f"and not exists (select 1 from orders o where o.addon_for=t.id) {extra} "
              f"order by t.issued_at limit {n}").split('\n')
 MAIN = pick('3-Day Pass', 1)[0]
 MAIN_EMAIL = q(f"select u.email from tickets t join users u on u.id=t.user_id where t.id='{MAIN}'")

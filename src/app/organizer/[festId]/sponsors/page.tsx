@@ -8,19 +8,30 @@ import { sql } from '@/lib/db';
 import { leadsReady } from '@/lib/sponsor-leads';
 import { addSponsor, removeSponsor } from '../../actions';
 
-export default async function Sponsors({ params }: { params: Promise<{ festId: string }> }) {
+export default async function Sponsors({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ remove?: string; err?: string; removed?: string }> }) {
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
+  const sp = await searchParams;
   const sponsors = await getSponsors(fest.id);
   const total = sponsors.reduce((a, s) => a + s.amount_paise, 0);
   const visits = sponsors.reduce((a, s) => a + s.visits, 0);
-  // Organizers see how many students shared (a count) — never the contacts.
+  // Verified booth visit = the visitor holds a gate-scanned ticket (same count as the sponsor dashboard and report).
+  const verifiedRows = await sql<{ sponsor_id: string; n: number }[]>`
+    select v.sponsor_id, count(*)::int n from sponsor_visits v join sponsors s on s.id = v.sponsor_id
+    where s.fest_id = ${fest.id} and exists
+      (select 1 from tickets t where t.fest_id = ${fest.id} and t.user_id = v.user_id and t.status = 'used')
+    group by 1`;
+  const verifiedBy = new Map(verifiedRows.map((r) => [r.sponsor_id, r.n]));
+  // Organizers see how many students shared (a count) — never the contacts. "any" includes withdrawn rows.
   const leadRows = (await leadsReady())
-    ? await sql<{ sponsor_id: string; n: number }[]>`
-        select l.sponsor_id, count(*)::int n from sponsor_leads l join sponsors s on s.id = l.sponsor_id
-        where s.fest_id = ${fest.id} and l.withdrawn_at is null group by 1`
+    ? await sql<{ sponsor_id: string; n: number; any: number }[]>`
+        select l.sponsor_id, (count(*) filter (where l.withdrawn_at is null))::int n, count(*)::int as any
+        from sponsor_leads l join sponsors s on s.id = l.sponsor_id
+        where s.fest_id = ${fest.id} group by 1`
     : [];
-  const leadsBy = new Map(leadRows.map((r) => [r.sponsor_id, r.n]));
+  const leadsBy = new Map(leadRows.map((r) => [r.sponsor_id, r]));
+  const removing = sponsors.find((s) => s.id === sp.remove);
+  const base = `/organizer/${fest.id}/sponsors`;
 
   return (
     <div className="stack g16">
@@ -28,24 +39,53 @@ export default async function Sponsors({ params }: { params: Promise<{ festId: s
       <div className="grid-2 grid-3">
         <Stat label="Sponsors" value={sponsors.length} color="var(--blue)" />
         <Stat label="Sponsorship" value={rupees(total, { compact: true })} color="var(--green)" />
-        <Stat label="Booth visits" value={num(visits)} sub="students who scanned a booth QR" />
+        <Stat label="Booth visits (total)" value={num(visits)} sub="all booth QR check-ins, verified or not" />
       </div>
+
+      {sp.err === 'leads' && <div className="alert error" role="alert">This sponsor has student leads, so it can&apos;t be removed. Students must keep their &ldquo;Stop sharing&rdquo; option.</div>}
+      {sp.removed && <div className="alert ok" role="status">Sponsor removed.</div>}
+
+      {removing && (
+        <section className="card stack g12" aria-label="Remove sponsor">
+          {(leadsBy.get(removing.id)?.any ?? 0) > 0 ? (
+            <>
+              <div className="h3">{removing.brand} can&apos;t be removed</div>
+              <p className="small muted">Students shared their contact with {removing.brand}. They must keep their &ldquo;Stop sharing&rdquo; option, and {removing.brand} must keep seeing who stopped, so this sponsor stays.</p>
+              <Link className="btn outline block" href={base}>OK</Link>
+            </>
+          ) : (
+            <>
+              <div className="h3">Remove {removing.brand}?</div>
+              <p className="small muted">Their dashboard, booth QR and {num(removing.visits)} booth visits will be deleted. This can&apos;t be undone.</p>
+              <div className="row g8 wrap-row">
+                <form action={removeSponsor} className="grow">
+                  <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={removing.id} />
+                  <button className="btn danger block" type="submit">Yes, remove {removing.brand}</button>
+                </form>
+                <Link className="btn outline grow" href={base}>Cancel</Link>
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       {sponsors.length === 0 ? <Empty icon="🏷️" title="No sponsors yet">Add a sponsor below — they get a live dashboard and a booth QR.</Empty> : (
         <div className="list">
           {sponsors.map((s) => (
-            <div key={s.id} className="li wrap-row">
-              <div className="avatar" style={{ color: 'var(--blue)' }}>{s.brand.slice(0, 2).toUpperCase()}</div>
-              <div className="grow" style={{ minWidth: 160 }}>
-                <div>{s.brand} <span className="badge blue" style={{ marginLeft: 4 }}>{s.tier}</span></div>
-                <div className="xs muted truncate">{s.email} · {rupees(s.amount_paise)} · {num(s.visits)} booth visits · {num(leadsBy.get(s.id) ?? 0)} leads</div>
+            <div key={s.id} className="li stack g12" style={{ alignItems: 'stretch' }} data-sponsor={s.id}>
+              <div className="row g12" style={{ alignItems: 'flex-start' }}>
+                <div className="avatar" style={{ color: 'var(--blue)' }}>{s.brand.slice(0, 2).toUpperCase()}</div>
+                <div className="grow" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                  <div>{s.brand} <span className="badge blue" style={{ marginLeft: 4 }}>{s.tier}</span></div>
+                  <div className="xs muted">{s.email} · {rupees(s.amount_paise)}</div>
+                  <div className="xs muted sponsor-counts">{num(verifiedBy.get(s.id) ?? 0)} verified · {num(s.visits)} total booth visits · {num(leadsBy.get(s.id)?.n ?? 0)} leads</div>
+                </div>
               </div>
-              <Link className="btn sm outline" href={`/organizer/${fest.id}/sponsors/${s.id}/report`}>Report</Link>
-              <a className="btn sm outline" href={`/booth/${s.booth_code}/print`} target="_blank" rel="noopener">Booth QR</a>
-              <form action={removeSponsor}>
-                <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={s.id} />
-                <button className="btn text xs" style={{ color: 'var(--red)' }} aria-label={`Remove ${s.brand}`}>✕</button>
-              </form>
+              <div className="row g8 wrap-row">
+                <Link className="btn outline grow" href={`${base}/${s.id}/report`}>Report</Link>
+                <a className="btn outline grow" href={`/booth/${s.booth_code}/print`} target="_blank" rel="noopener">Booth QR</a>
+                <Link className="btn danger" href={`${base}?remove=${s.id}`} aria-label={`Remove ${s.brand}`}>✕</Link>
+              </div>
             </div>
           ))}
         </div>

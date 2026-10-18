@@ -13,8 +13,13 @@ def check(name, cond, extra=''):
     results.append((name, bool(cond))); print(('PASS ' if cond else 'FAIL ') + name + (f'  [{str(extra)[:300]}]' if extra != '' else ''))
 def q(sql, db=DB): return subprocess.run(db + ' -qtAc "' + sql + '"', shell=True, capture_output=True, text=True).stdout.strip()
 def sh(cmd): return subprocess.run(cmd, shell=True, capture_output=True, text=True)
-def inr(paise):  # same as rupees() in src/lib/format.ts
-    return subprocess.run(['node', '-e', f'const r={paise}/100;console.log("₹"+r.toLocaleString("en-IN",{{maximumFractionDigits:r%1?2:0}}))'], capture_output=True, text=True).stdout.strip()
+def inr(paise):  # same as rupees() in src/lib/format.ts: whole rupees, or always two decimals
+    d = 0 if paise % 100 == 0 else 2
+    return subprocess.run(['node', '-e', f'console.log("₹"+({paise}/100).toLocaleString("en-IN",{{minimumFractionDigits:{d},maximumFractionDigits:{d}}}))'], capture_output=True, text=True).stdout.strip()
+async def clipped(pg, sel):
+    """Texts inside `sel` that are cut off (wider than their box)."""
+    return await pg.evaluate('''(sel) => [...document.querySelectorAll(sel + ' *')].filter(e => e.offsetParent && e.children.length === 0
+        && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== 'visible').map(e => e.textContent.slice(0, 60))''', sel)
 def hour_label(h): return f"{h % 12 or 12}{' AM' if h < 12 else ' PM'}"
 
 async def login(b, email, base=B):
@@ -68,6 +73,10 @@ async def main():
     # one checked-in attendee from a tiny college (must never be named to sponsors)
     tiny_uid, tiny_old = q(f"select u.id, coalesce(u.college,'') from tickets t join users u on u.id=t.user_id where t.fest_id='{neon}' and t.status='used' and u.email like 'attendee%' order by u.email limit 1").split('|')
     q(f"update users set college='Tiny Test College' where id='{tiny_uid}'")
+    # fix-round users: a confirmed student with no ticket, an unconfirmed student with no college
+    for em, nm, col, ver in [('ticketless@seed.thefest.in', 'Tara Ticketless', 'Nowhere College', 'now()'), ('unconfirmed@seed.thefest.in', 'Uma Unconfirmed', None, 'null')]:
+        q(f"insert into users (email, password_hash, name, role, college, email_verified_at) select '{em}', password_hash, '{nm}', 'student', {repr(col) if col else 'null'}, {ver} from users where email='sponsor@thefest.in' on conflict (email) do nothing")
+    admin_id = q("select id from users where email='admin@thefest.in'")
     lead = lambda: q(f"select coalesce(name,'')||'|'||coalesce(phone,'')||'|'||coalesce(course_year,'')||'|'||shared_at||'|'||coalesce(withdrawn_at::text,'') from sponsor_leads where sponsor_id='{s1}' and user_id='{stu}'")
     try:
         async with async_playwright() as p:
@@ -75,14 +84,24 @@ async def main():
             errs = []
             st = await login(b, 'student@thefest.in'); st.on('pageerror', lambda e: errs.append(str(e)))
 
+            # R9. seeded demo visits and leads are never in the future
+            check('R9. seed: no booth visit, share or withdrawal is in the future',
+                  q("select count(*) from sponsor_visits where created_at > now()") == '0' and
+                  q("select count(*) from sponsor_leads where shared_at > now() or withdrawn_at > now()") == '0')
+            check('R2. money keeps two decimals when not whole (₹6,024.10), none when whole', inr(602410) == '₹6,024.10' and inr(50000000) == '₹5,00,000' and inr(1250) == '₹12.50')
+
             # 1. check in without sharing, still one tap
             await st.goto(f'{B}/booth/{code}')
             check('1. booth: share card hidden before check-in', await st.locator('text=Want Volt Energy to contact you?').count() == 0)
             await st.click('button:has-text("Check in at")'); await st.wait_for_url('**done=1')
             check('1. one tap checks in without sharing', q(f"select count(*) from sponsor_visits where sponsor_id='{s1}' and user_id='{stu}'") == '1'
                   and q(f"select count(*) from sponsor_leads where user_id='{stu}'") == '0')
+            stu_college = q(f"select college from users where id='{stu}'")
+            dl = await text(st, 'dl.lead-items')
             check('1. after check-in the optional share card shows the itemised notice',
-                  (lambda body: all(t in body for t in ['Want Volt Energy to contact you?', 'Volt Energy will get: your name, email, college', 'Data Protection Board of India']))(await text(st)))
+                  (lambda body: all(t in body for t in ['Want Volt Energy to contact you?', 'Volt Energy will get:', 'Data Protection Board of India']))(await text(st)))
+            check('R7. notice shows the actual name, email, college and phone that would be sent',
+                  all(t in dl for t in ['Arjun Sharma', 'student@thefest.in', stu_college, '9876500000']), dl)
             # the share form exactly as the server sends it (before React hydrates it), for plain no-JS POSTs below
             h = await (await st.request.get(f'{B}/booth/{code}')).text(); i = h.find('name="adult"')
             share_html = h[h.rfind('<form', 0, i):h.find('</form>', i) + 7]
@@ -102,6 +121,7 @@ async def main():
             await st.check('input[name=adult]'); await btn.click(); await st.wait_for_url('**shared=1')
             row = lead().split('|')
             check('4. after sharing the booth page shows the shared state', await st.locator('text=Shared with Volt Energy on').count() == 1)
+            check('R6. shared state: "If you stop, Volt Energy will be told to delete your details"', 'If you stop, Volt Energy will be told to delete your details' in await text(st))
             check('3. phone left unticked → not stored', row[1] == '', row)
             first_shared = row[3]
             await forge_share(st, share_html, adult=True, course='=HYPERLINK("x")')
@@ -181,6 +201,82 @@ async def main():
             check('8. organizer report/tab never show lead names or emails', not any(e in body or e in t for e in emails) and not any(n in body for n in names))
             check('organizer report shows the deal and cost figures', 'Cost per verified attendee' in body and inr(int(amount)) in body)
 
+            # R-must-3. unconfirmed student: confirm-email notice with resend instead of the share form; forged POST still refused
+            un = await login(b, 'unconfirmed@seed.thefest.in'); un.on('pageerror', lambda e: errs.append(str(e)))
+            uid = q("select id from users where email='unconfirmed@seed.thefest.in'")
+            await un.goto(f'{B}/booth/{code}'); await un.click('button:has-text("Check in at")'); await un.wait_for_url('**done=1')
+            card = un.locator('section[aria-label="Share your contact"]')
+            ct = await card.inner_text()
+            check('R3. unconfirmed: confirm-email notice with resend, no share form',
+                  'Confirm your email' in ct and await card.locator('button:has-text("Send the link again")').count() == 1 and await un.locator('input[name=adult]').count() == 0, ct[:200])
+            check('R7/should-7. no college on the account → "College" not listed', 'College' not in await text(un, 'dl.lead-items') and 'Uma Unconfirmed' in ct)
+            await forge_share(un, share_html, adult=True)
+            check('R3. forged share from an unconfirmed account → err=verify, no row', 'err=verify' in un.url and q(f"select count(*) from sponsor_leads where user_id='{uid}'") == '0', un.url)
+            check('R3. unconfirmed booth page at 390px: no sideways scroll', await no_sideways(un))
+
+            # R-must-1. a lead from a student with no gate-scanned ticket: lead rate uses all booth visits, never > 100%
+            tl = await login(b, 'ticketless@seed.thefest.in'); tl.on('pageerror', lambda e: errs.append(str(e)))
+            await tl.goto(f'{B}/booth/{code}'); await tl.click('button:has-text("Check in at")'); await tl.wait_for_url('**done=1')
+            await tl.check('input[name=adult]'); await tl.click('button:has-text("Share my contact with")'); await tl.wait_for_url('**shared=1')
+            await tl.goto(f'{B}/me')
+            check('R1. ticketless student shared and sees it in /me', 'Volt Energy' in await text(tl))
+            fig = lambda pg, label: pg.locator('.rp-fig', has_text=label).locator('.v').first.inner_text()
+            n_leads = int(q(f"select count(*) from sponsor_leads where sponsor_id='{s1}' and withdrawn_at is null"))
+            v_all = int(q(f"select count(*) from sponsor_visits where sponsor_id='{s1}'"))
+            await sp.goto(f'{B}/sponsor/{s1}/report')
+            rate = await fig(sp, 'Lead rate')
+            check('R1. lead rate = leads ÷ all booth visits (≤100%)', rate == f'{round(n_leads / v_all * 100)}%' and int(rate.rstrip('%')) <= 100, (rate, n_leads, v_all))
+            check('R1. cost per lead = deal ÷ active leads', await fig(sp, 'Cost per lead') == inr(round(int(amount) / n_leads)))
+            hw = await text(sp, 'section[aria-label="How we counted"]')
+            check('R1. "How we counted" explains the lead rate base', 'leads ÷ all booth visits' in hw and 'Booth visits (total)' in hw, hw[:300])
+            # lead rate can't pass 100% even when every visitor shared (tiny throwaway sponsor: 1 ticketless visit, 1 lead)
+            tid2 = q(f"insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code) values ('{neon}', 'sponsor@thefest.in', 'Rate Test', 'Partner', 100000, 'ratetest123') returning id").split('\n')[0]
+            tlid = q("select id from users where email='ticketless@seed.thefest.in'")
+            q(f"insert into sponsor_visits (sponsor_id, user_id) values ('{tid2}', '{tlid}'); insert into sponsor_leads (sponsor_id, user_id, name, email, notice_version) values ('{tid2}', '{tlid}', 'Tara', 'ticketless@seed.thefest.in', 'lead-v1')")
+            await sp.goto(f'{B}/sponsor/{tid2}/report')
+            check('R1. every visitor shared, none verified → lead rate 100%, not more', await fig(sp, 'Lead rate') == '100%', await fig(sp, 'Lead rate'))
+            q(f"delete from sponsors where id='{tid2}'")
+
+            # R-should-4, R5, R8: sponsor dashboard labels, leads card and offer field at 390px
+            await sp.goto(f'{B}/sponsor/{s1}')
+            vt = await sp.locator('.stat', has_text='Booth visits (verified)').inner_text()
+            ver_now = int(q(f"select count(*) from sponsor_visits v where v.sponsor_id='{s1}' and exists (select 1 from tickets t where t.fest_id='{neon}' and t.user_id=v.user_id and t.status='used')"))
+            check('R5. dashboard: "N in total (M unverified)" and "verified today"', f'{v_all} in total ({v_all - ver_now} unverified)' in vt and 'verified today' in vt, vt)
+            check('R-should-4. hourly chart is labelled verified', await sp.locator('text=Verified booth visits by hour').count() == 1)
+            check('R8. leads card at 390px: course/year and names not cut off', await clipped(sp, 'section[aria-label=Leads]') == [], await clipped(sp, 'section[aria-label=Leads]'))
+            offer = sp.locator('input[name=lead_offer]')
+            ph = await offer.get_attribute('placeholder'); old_val = await offer.input_value()
+            await offer.fill(ph)
+            fits = await offer.evaluate('e => e.scrollWidth <= e.clientWidth + 1'); await offer.fill(old_val)
+            check('R8. offer field placeholder fits at 390px', fits, ph)
+
+            # R-tester-1, R3, must-2: organizer sponsors tab at 390px; remove is refused for a sponsor with leads
+            await org.goto(f'{B}/organizer/{neon}/sponsors')
+            row = org.locator(f'[data-sponsor="{s1}"]')
+            counts = await row.locator('.sponsor-counts').inner_text()
+            check('R-T1. organizer tab at 390px: counts line fully visible, "N verified · M total booth visits · K leads"',
+                  counts == f'{ver_now} verified · {v_all} total booth visits · {n_leads} leads' and await clipped(org, f'[data-sponsor="{s1}"]') == [], counts)
+            check('R-T1. organizer tab at 390px: no sideways scroll; Report, Booth QR and ✕ ≥44px',
+                  await no_sideways(org) and await min_height(org, f'[data-sponsor="{s1}"] .btn') >= 44, await min_height(org, f'[data-sponsor="{s1}"] .btn'))
+            await row.locator('a[aria-label="Remove Volt Energy"]').click(); await org.wait_for_url(f'**remove={s1}')
+            box = org.locator('section[aria-label="Remove sponsor"]')
+            check('R-M2. ✕ on a sponsor with leads: page explains it can\'t be removed, no remove button',
+                  "can't be removed" in await box.inner_text() and await box.locator('button').count() == 0)
+            n_rows = q(f"select count(*) from sponsor_leads where sponsor_id='{s1}'")
+            dz = q(f"insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code) values ('{neon}', 'nobody@seed.thefest.in', 'Zero Leads', 'Partner', 0, 'zeroleads123') returning id").split('\n')[0]
+            await org.goto(f'{B}/organizer/{neon}/sponsors?remove={dz}')
+            check('R-M2. ✕ on a sponsor with no leads asks to confirm on the page', 'Remove Zero Leads?' in await box.inner_text() and await box.locator('a:has-text("Cancel")').count() == 1)
+            # forged: point the confirm form at Volt Energy → refused by the server
+            await box.locator('input[name=id]').evaluate(f'e => e.value = "{s1}"')
+            await box.locator('button:has-text("Yes, remove")').click(); await org.wait_for_url('**err=leads')
+            check('R-M2. server refuses removing a sponsor with leads (forged request)', q(f"select count(*) from sponsors where id='{s1}'") == '1'
+                  and q(f"select count(*) from sponsor_leads where sponsor_id='{s1}'") == n_rows and "can't be removed" in await text(org, '[role=alert]'))
+            await tl.goto(f'{B}/me')
+            check('R-M2. the student\'s /me entry is still there', 'Volt Energy' in await text(tl))
+            await org.goto(f'{B}/organizer/{neon}/sponsors?remove={dz}')
+            await box.locator('button:has-text("Yes, remove")').click(); await org.wait_for_url('**removed=1')
+            check('R-M2. a sponsor with no leads can still be removed', q(f"select count(*) from sponsors where id='{dz}'") == '0')
+
             # 10. report numbers
             foot = int(q(f"select count(*) from tickets where fest_id='{neon}' and status='used'"))
             ver = q(f"select count(*) from sponsor_visits v where v.sponsor_id='{s1}' and exists (select 1 from tickets t where t.fest_id='{neon}' and t.user_id=v.user_id and t.status='used')")
@@ -188,6 +284,8 @@ async def main():
             await sp.goto(f'{B}/sponsor/{s1}/report')
             check('10. footfall = gate-scanned tickets', (await fig(sp, 'Verified footfall')).replace(',', '') == str(foot), foot)
             check('10. verified visits = visitors holding a used ticket', (await fig(sp, 'Booth visits (verified)')).replace(',', '') == ver, ver)
+            rsub = await sp.locator('.rp-fig', has_text='Booth visits (verified)').locator('.s').inner_text()
+            check('R5. report: "N in total (M unverified)"', rsub == f'{v_all} in total ({v_all - int(ver)} unverified)', rsub)
             check('10. cost per verified attendee = deal ÷ footfall, ₹ Indian grouping', await fig(sp, 'Cost per verified attendee') == inr(round(int(amount) / foot)), (await fig(sp, 'Cost per verified attendee'), inr(round(int(amount) / foot))))
             # ₹5,00,000 ÷ footfall worked example on a throwaway sponsorship
             tid = q(f"insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code) values ('{neon}', 'sponsor@thefest.in', 'ROI Test', 'Partner', {50000 * foot}, 'roitest123') returning id").split('\n')[0]
@@ -213,6 +311,12 @@ async def main():
             check('11. report: college under 5 merged into "Other"', 'Tiny Test College' not in aud and 'Other' in aud, aud[:200])
             t = (await text(sp)).lower()
             check('13. demo fest report shows SAMPLE and "numbers will change"', 'sample' in t and 'numbers will change' in t)
+            # R10. a real fest run from a staff @thefest.in account (not a demo organizer) is never labelled SAMPLE
+            rf = q(f"insert into fests (slug, organizer_id, name, college, city, starts_on, ends_on, status) select 'real-fest-r1', '{admin_id}', 'Real Fest', college, city, starts_on, ends_on, 'live' from fests where id='{neon}' returning id").split('\n')[0]
+            rs = q(f"insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code) values ('{rf}', 'sponsor@thefest.in', 'Real Brand', 'Partner', 100000, 'realfest123') returning id").split('\n')[0]
+            await sp.goto(f'{B}/sponsor/{rs}/report')
+            check('R10. real fest (admin@thefest.in organizer, sponsor@thefest.in brand): no SAMPLE label', 'sample' not in (await text(sp)).lower() and 'Real Brand' in await text(sp))
+            q(f"delete from fests where id='{rf}'")
             check('15. report at 390px: no sideways scroll, print button ≥44px', await no_sideways(sp) and await min_height(sp, 'button:has-text("Print")') >= 44)
             await sp.goto(f'{B}/sponsor/{s1}')
             t = await text(sp, 'main')
@@ -264,6 +368,8 @@ async def main():
         q(f"update users set phone=null where id='{stu}'")
         q("delete from sponsors where booth_code='roitest123'")
         q("delete from users where email='othersponsor@seed.thefest.in'")
+        q("delete from fests where slug='real-fest-r1'"); q("delete from sponsors where booth_code in ('ratetest123','zeroleads123')")
+        q("delete from users where email in ('ticketless@seed.thefest.in','unconfirmed@seed.thefest.in')")
 
     print(f"\n{sum(1 for _, ok in results if ok)}/{len(results)} sponsor-leads checks passed")
     sys.exit(0 if results and all(ok for _, ok in results) else 1)

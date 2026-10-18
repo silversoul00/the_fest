@@ -5,6 +5,7 @@ import { sql } from '@/lib/db';
 import { BOOTH_CODE_RE, leadsReady } from '@/lib/sponsor-leads';
 import { recordBoothVisit, shareLead, stopSharing } from './actions';
 import { ShareForm, StopSharingForm } from './LeadForms';
+import { VerifyNotice } from '@/components/VerifyNotice';
 
 export const metadata = { title: 'Booth check-in' };
 
@@ -34,7 +35,13 @@ export default async function Booth({ params, searchParams }: { params: Promise<
     : [];
   const checkedIn = !!(visited || sp.done);
   const err = sp.err ? ERRORS[sp.err] : null;
-  const items = ['your name', 'email', 'college', ...(user.phone ? ['phone (only if you tick it)'] : []), 'course & year (if you type it)'];
+  // Exactly what the brand would get, from the account as it is now (the server snapshots the same fields).
+  const items: [string, string][] = [
+    ['Name', user.name], ['Email', user.email],
+    ...(user.college?.trim() ? [['College', user.college.trim()] as [string, string]] : []),
+    ...(user.phone?.trim() ? [['Phone', `${user.phone.trim()} (only if you tick it)`] as [string, string]] : []),
+    ['Course & year', 'only if you type it'],
+  ];
   const sharedOn = lead ? new Date(lead.shared_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
   return (
@@ -64,19 +71,29 @@ export default async function Booth({ params, searchParams }: { params: Promise<
             {lead ? (
               <>
                 <div className="h3">✓ Shared with {b.brand} on {sharedOn}</div>
-                <p className="small muted">You can stop any time here or from My account. {b.brand} is told to delete your details.</p>
+                <p className="small muted">You can stop any time here or from My account. If you stop, {b.brand} will be told to delete your details.</p>
                 <StopSharingForm action={stopSharing} sponsorId={b.id} from={code} brand={b.brand} />
               </>
             ) : (
               <>
                 <div className="h3">Want {b.brand} to contact you?</div>
                 {b.lead_offer && <p className="soft" style={{ overflowWrap: 'anywhere' }}>🎁 {b.lead_offer}</p>}
+                <p className="small muted">Optional — your check-in already counts. {b.brand} will get:</p>
+                <dl className="small lead-items" style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
+                  {items.map(([k, v]) => (
+                    <div key={k} style={{ display: 'contents' }}><dt className="muted">{k}</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{v}</dd></div>
+                  ))}
+                </dl>
                 <p className="small muted">
-                  Optional — your check-in already counts. {b.brand} will get: {items.join(', ')}. They&apos;ll use it only to contact you about
+                  They&apos;ll use it only to contact you about
                   {' '}{b.brand}&apos;s products, offers and opportunities. THE FEST doesn&apos;t sell your data. You can stop sharing any time from
                   this page or My account. Complaints: Data Protection Board of India. <Link href="/legal/privacy" className="accent">Privacy policy</Link>
                 </p>
-                <ShareForm action={shareLead} code={code} brand={b.brand} hasPhone={!!user.phone} />
+                {user.verified ? (
+                  <ShareForm action={shareLead} code={code} brand={b.brand} hasPhone={!!user.phone?.trim()} />
+                ) : (
+                  <VerifyNotice email={user.email} why="You can share your contact once your email is confirmed (so the brand gets an address that is really yours). Then open this page again." />
+                )}
               </>
             )}
           </section>

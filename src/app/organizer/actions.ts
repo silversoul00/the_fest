@@ -10,6 +10,7 @@ import { OrderError } from '@/lib/orders';
 import { boothCode } from '@/lib/ticket-crypto';
 import { isUuid } from '@/lib/http';
 import { canManage } from '@/lib/queries';
+import { leadsReady } from '@/lib/sponsor-leads';
 import { siteUrl } from '@/lib/env';
 import { afterResponse } from '@/lib/errors';
 import { sendEmail } from '@/lib/mail';
@@ -289,8 +290,15 @@ export async function addSponsor(_: ActionState, fd: FormData): Promise<ActionSt
 
 export async function removeSponsor(fd: FormData) {
   const { fest } = await ownFest(fd);
-  await sql`delete from sponsors where id = ${s(fd, 'id')} and fest_id = ${fest.id}`;
+  const id = s(fd, 'id');
+  if (!isUuid(id)) redirect(`/organizer/${fest.id}/sponsors`);
+  // Students who shared with this brand must keep their "Stop sharing" button, and the brand must keep seeing
+  // withdrawals — so a sponsor with any leads (active or withdrawn) can't be deleted.
+  const [lead] = (await leadsReady()) ? await sql`select 1 from sponsor_leads where sponsor_id = ${id} limit 1` : [];
+  if (lead) redirect(`/organizer/${fest.id}/sponsors?err=leads`);
+  await sql`delete from sponsors where id = ${id} and fest_id = ${fest.id}`;
   refresh(fest.id);
+  redirect(`/organizer/${fest.id}/sponsors?removed=1`);
 }
 
 // ─── Payments: zero-fee bank UPI ──────────────────────────
