@@ -13,11 +13,13 @@ const CHIP: Record<string, [string, string]> = {
  * One sponsorship request, as the brand ('brand') or the fest ('org') sees it. Received + open → Accept / Decline;
  * sent + open → Withdraw. The other side's contact shows only once accepted (the query leaves it null before).
  */
-export function RequestCard({ r, side, action, festId }: {
+export function RequestCard({ r, side, action, festId, locked }: {
   r: RequestView; side: 'brand' | 'org'; action: (s: ActionState, fd: FormData) => Promise<ActionState>; festId?: string;
+  /** No buttons (e.g. email not confirmed yet). The server refuses these actions anyway. */
+  locked?: boolean;
 }) {
   const received = (r.direction === 'brand_to_org') === (side === 'org');
-  const open = r.status === 'sent' && !r.expired;
+  const open = r.status === 'sent' && !r.expired && !locked;
   const [label, color] = CHIP[r.status === 'sent' && r.expired ? 'expired' : r.status];
   const hidden = (what: string) => (
     <>

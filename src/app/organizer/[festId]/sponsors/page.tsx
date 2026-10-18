@@ -8,7 +8,8 @@ import { sql } from '@/lib/db';
 import { leadsReady } from '@/lib/sponsor-leads';
 import { addSponsor, orgDecide, removeSponsor, sendBrandRequest, setOpenToSponsors } from '../../actions';
 import { RequestCard, RequestFields } from '@/components/RequestCard';
-import { BRAND_CATEGORIES, REQUESTS_MISSING, festRequests, requestsReady } from '@/lib/sponsor-requests';
+import { VerifyNotice } from '@/components/VerifyNotice';
+import { ALREADY_SPONSOR, BRAND_CATEGORIES, REQUESTS_MISSING, SEND_NEEDS_LIVE, festRequests, requestsReady, visibleToBrands } from '@/lib/sponsor-requests';
 
 export default async function Sponsors({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ remove?: string; err?: string; removed?: string; to?: string; bcat?: string; bcity?: string }> }) {
   const user = await requireUser('organizer');
@@ -39,17 +40,19 @@ export default async function Sponsors({ params, searchParams }: { params: Promi
   const ready = await requestsReady();
   const bcat = sp.bcat && sp.bcat in BRAND_CATEGORIES ? sp.bcat : '';
   const bcity = (sp.bcity ?? '').trim().slice(0, 40);
-  type BrandRow = { user_id: string; brand: string; category: string; budget_min_paise: number; budget_max_paise: number; cities: string[]; about: string | null };
+  type BrandRow = { user_id: string; brand: string; category: string; budget_min_paise: number; budget_max_paise: number; cities: string[]; about: string | null; sponsoring: boolean };
   const [requests, brands, [open]] = ready ? await Promise.all([
     festRequests(fest.id),
     sql<BrandRow[]>`
-      select p.user_id, p.brand, p.category, p.budget_min_paise, p.budget_max_paise, p.cities, p.about
+      select p.user_id, p.brand, p.category, p.budget_min_paise, p.budget_max_paise, p.cities, p.about,
+        exists (select 1 from sponsors s where s.fest_id = ${fest.id} and s.email = u.email) as sponsoring
       from brand_profiles p join users u on u.id = p.user_id
       where p.listed and u.role = 'sponsor' ${bcat ? sql`and p.category = ${bcat}` : sql``}
         ${bcity ? sql`and exists (select 1 from unnest(p.cities) c where c ilike ${bcity})` : sql``}
       order by p.updated_at desc limit 100`,
-    sql<{ open: boolean }[]>`select open_to_sponsors as open from fests where id = ${fest.id}`,
-  ]) : [[], [], [{ open: false }]];
+    sql<{ open: boolean; visible: boolean }[]>`select f.open_to_sponsors as open, ${visibleToBrands()} as visible from fests f where f.id = ${fest.id}`,
+  ]) : [[], [], [{ open: false, visible: false }]];
+  // Open (waiting) requests come first — the query sorts them to the top.
   const received = requests.filter((r) => r.direction === 'brand_to_org');
   const sentReqs = requests.filter((r) => r.direction === 'org_to_brand');
   const target = brands.find((b) => b.user_id === sp.to);
@@ -128,12 +131,13 @@ export default async function Sponsors({ params, searchParams }: { params: Promi
           </section>
 
           <section className="stack g12" aria-label="Requests">
+            {!user.verified && <VerifyNotice email={user.email} why="You can send, accept or decline sponsorship requests once your email is confirmed." />}
             <div className="h3">Requests received ({received.length})</div>
             {received.length === 0 ? <p className="small muted">No brand has asked yet.</p>
-              : received.map((r) => <RequestCard key={r.id} r={r} side="org" action={orgDecide} festId={fest.id} />)}
+              : received.map((r) => <RequestCard key={r.id} r={r} side="org" action={orgDecide} festId={fest.id} locked={!user.verified} />)}
             <div className="h3 mt8">Requests sent ({sentReqs.length})</div>
             {sentReqs.length === 0 ? <p className="small muted">Pick a brand below and send a request.</p>
-              : sentReqs.map((r) => <RequestCard key={r.id} r={r} side="org" action={orgDecide} festId={fest.id} />)}
+              : sentReqs.map((r) => <RequestCard key={r.id} r={r} side="org" action={orgDecide} festId={fest.id} locked={!user.verified} />)}
           </section>
 
           <section className="stack g12" id="brands" aria-label="Find brands">
@@ -145,15 +149,20 @@ export default async function Sponsors({ params, searchParams }: { params: Promi
               <label className="field"><span>City</span><input className="input" name="bcity" defaultValue={bcity} placeholder="Bengaluru" /></label>
               <button className="btn outline" type="submit" style={{ alignSelf: 'flex-end' }}>Filter</button>
             </form>
+            {!open.visible && <div className="alert info send-blocked">{SEND_NEEDS_LIVE}</div>}
             {target && (
               <div className="card" id="send" aria-label={`Send a request to ${target.brand}`}>
                 <div className="h3 mb8">Send a request to {target.brand}</div>
+                {target.sponsoring ? <div className="alert ok">{ALREADY_SPONSOR} Its deal is in the list above.</div>
+                  : !user.verified ? <VerifyNotice email={user.email} why="You can send sponsorship requests once your email is confirmed." />
+                  : !open.visible ? <p className="small muted">{SEND_NEEDS_LIVE}</p> : (
                 <ActionForm action={sendBrandRequest} resetOnSuccess>
                   <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="brandUserId" value={target.user_id} />
                   <RequestFields deliverablesHint="What you offer (stall, mentions…)" />
                   <p className="xs muted">{target.brand} sees your fest and college — not your email — until they accept.</p>
                   <Submit className="btn blue block">Send request</Submit>
                 </ActionForm>
+                )}
               </div>
             )}
             {brands.length === 0 ? <p className="small muted">No listed brands match.</p> : (
@@ -164,7 +173,8 @@ export default async function Sponsors({ params, searchParams }: { params: Promi
                     <div className="row g8 wrap-row"><span className="badge gray">{BRAND_CATEGORIES[b.category] ?? b.category}</span><span className="badge green">{budget(b)}</span></div>
                     {b.cities.length > 0 && <div className="xs muted">{b.cities.join(' · ')}</div>}
                     {b.about && <div className="small soft">{b.about}</div>}
-                    <Link className="btn outline block" href={`${base}?to=${b.user_id}#send`}>Send request</Link>
+                    {b.sponsoring ? <span className="badge green already-sponsor">Already a sponsor of this fest</span>
+                      : open.visible && <Link className="btn outline block" href={`${base}?to=${b.user_id}#send`}>Send request</Link>}
                   </div>
                 ))}
               </div>

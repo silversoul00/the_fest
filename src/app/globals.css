@@ -335,5 +335,5 @@ img, svg { display: block; max-width: 100%; }
 
 /* Sponsorship requests (v2.6) */
 summary.btn { list-style: none; } summary.btn::-webkit-details-marker { display: none; }
-.sp-nav { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.sp-nav { display: flex; flex-wrap: wrap; gap: 8px; }
 .sp-nav .chip { min-height: 44px; display: inline-flex; align-items: center; flex: none; }

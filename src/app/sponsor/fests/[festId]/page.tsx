@@ -31,6 +31,7 @@ export default async function MediaKit({ params }: { params: Promise<{ festId: s
   const kit = await mediaKit(f.id);
   const brand = user.role === 'sponsor';
   const [profile] = brand ? await sql`select 1 from brand_profiles where user_id = ${user.id}` : [];
+  const [sponsoring] = brand ? await sql`select 1 from sponsors where fest_id = ${f.id} and email = ${user.email}` : [];
 
   const body = (
     <>
@@ -58,7 +59,8 @@ export default async function MediaKit({ params }: { params: Promise<{ festId: s
       {brand && (
         <section className="card" id="request" aria-label="Request to sponsor">
           <div className="h3 mb8">Request to sponsor</div>
-          {!user.verified ? <VerifyNotice email={user.email} />
+          {sponsoring ? <div className="alert ok already-sponsor">Already a sponsor of this fest. <Link href="/sponsor">Open your sponsorships</Link></div>
+            : !user.verified ? <VerifyNotice email={user.email} />
             : !profile ? <Link className="btn blue block" href="/sponsor/profile?need=1">Set up your brand profile first</Link>
             : (
               <ActionForm action={requestToSponsor} resetOnSuccess>

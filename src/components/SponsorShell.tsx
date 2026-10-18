@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { sql } from '@/lib/db';
-import { requestsReady } from '@/lib/sponsor-requests';
+import { festOpen, requestsReady } from '@/lib/sponsor-requests';
 import type { User } from '@/lib/types';
 import { logout } from '@/app/(auth)/actions';
 
@@ -11,7 +11,7 @@ export async function SponsorShell({ user, cur, children }: { user: User; cur: '
     const [r] = await sql<{ n: number }[]>`
       select count(*)::int n from sponsor_requests r join fests f on f.id = r.fest_id
       where r.brand_user_id = ${user.id} and r.direction = 'org_to_brand' and r.status = 'sent'
-        and f.status not in ('cancelled', 'ended') and f.ends_on >= (now() at time zone 'Asia/Kolkata')::date`;
+        and ${festOpen()}`;
     waiting = r?.n ?? 0;
   }
   const link = (k: typeof cur, href: string, label: React.ReactNode) =>

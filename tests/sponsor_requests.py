@@ -57,6 +57,12 @@ async def capture_action(pg, click):
     await pg.unroute('**/*')
     return box
 
+def swap(act, *pairs):
+    """A captured action with ids in its form body replaced (UUIDs have the same length), to post it for another fest/request."""
+    body = act['body']
+    for a, b in pairs: body = body.replace(a.encode(), b.encode())
+    return {**act, 'body': body}
+
 async def replay(ctx_req, act):
     r = await ctx_req.post(act['url'], headers={**act['headers'], 'origin': B}, data=act['body'], max_redirects=0)
     return await r.text()
@@ -87,13 +93,16 @@ async def main():
     mk = lambda em, nm, role, ver: q(f"insert into users (email, password_hash, name, role, email_verified_at) select '{em}', password_hash, '{nm}', '{role}', {ver} from users where email='sponsor@thefest.in' on conflict (email) do nothing")
     mk('newbrand@seed.thefest.in', 'Nina Nova', 'sponsor', 'now()'); mk('unver@seed.thefest.in', 'Umesh Unverified', 'sponsor', 'null')
     mk('coorg@seed.thefest.in', 'Cora Coorganizer', 'organizer', 'now()')
-    q(f"insert into fest_members (fest_id, email) values ('{neon}', 'coorg@seed.thefest.in') on conflict do nothing")
+    q(f"insert into fest_members (fest_id, email) values ('{neon}', 'coorg@seed.thefest.in'), ('{kalaa}', 'coorg@seed.thefest.in') on conflict do nothing")
+    mk('unorg@seed.thefest.in', 'Uma Unverified Organizer', 'organizer', 'null'); mk('pitch@seed.thefest.in', 'Priya Pitch', 'sponsor', 'now()')
+    unorg = q("select id from users where email='unorg@seed.thefest.in'"); pitch = q("select id from users where email='pitch@seed.thefest.in'")
+    q(f"insert into brand_profiles (user_id, brand, category, listed) values ('{pitch}', 'Pitch Perfect', 'tech', true) on conflict do nothing")
     nb = q("select id from users where email='newbrand@seed.thefest.in'"); unv = q("select id from users where email='unver@seed.thefest.in'")
     volt = q("select id from users where email='sponsor@thefest.in'"); chai = q("select id from users where email='brand@seed.thefest.in'")
     # throwaway fests (run by Kalaa's organizer, so Neon's "last fest" stays Goal Rush) that must never be shown to brands even though they are "open to sponsors"
-    for slug, status, s, e in [('sr-draft', 'draft', 5, 6), ('sr-cancel', 'cancelled', 5, 6), ('sr-past', 'live', -5, -1)]:
+    for slug, status, s, e in [('sr-draft', 'draft', 5, 6), ('sr-cancel', 'cancelled', 5, 6), ('sr-past', 'live', -5, -1), ('sr-review', 'review', 5, 6)]:
         q(f"insert into fests (slug, organizer_id, name, college, city, category, starts_on, ends_on, status, open_to_sponsors) select '{slug}', organizer_id, 'Hidden {slug}', college, city, category, current_date + {s}, current_date + {e}, '{status}', true from fests where id='{kalaa}'")
-    hidden = {slug: fid(slug) for slug in ['sr-draft', 'sr-cancel', 'sr-past']}
+    hidden = {slug: fid(slug) for slug in ['sr-draft', 'sr-cancel', 'sr-past', 'sr-review']}
     q(f"update fests set open_to_sponsors = true where id in ('{goal}', '{beats}')")
     # earlier suites may have cancelled Commerce Carnival (its open request to Volt Energy is used below): run it live
     comm_old = q(f"select status||'|'||starts_on||'|'||ends_on from fests where id='{comm}'").split('|')
@@ -108,6 +117,20 @@ async def main():
             org = await login(b, 'organizer@thefest.in'); org.on('pageerror', lambda e: errs.append(str(e)))
             sp = await login(b, 'sponsor@thefest.in'); sp.on('pageerror', lambda e: errs.append(str(e)))
             nw = await login(b, 'newbrand@seed.thefest.in'); nw.on('pageerror', lambda e: errs.append(str(e)))
+
+            # tester 3: a new brand's home and Requests point somewhere useful
+            await nw.goto(f'{B}/sponsor'); t = await text(nw, 'main')
+            check('new brand home links to Find fests and Brand profile', await nw.locator('main .sp-start a[href="/sponsor/fests"]').count() == 1
+                  and await nw.locator('main .sp-start a[href="/sponsor/profile"]').count() == 1, t[:200])
+            await nw.goto(f'{B}/sponsor/requests'); t = await text(nw, 'section[aria-label=Received]')
+            check('Requests empty state (not listed) says how to get listed', "can't find your brand yet" in t and 'Your brand is listed' not in t, t)
+            # tester 2: brand nav at 390px — every tab is on screen, including the active one
+            for path in ['/sponsor/profile', '/sponsor/requests']:
+                await nw.goto(B + path)
+                boxes = [await c.bounding_box() for c in await nw.locator('.sp-nav .chip').all()]
+                cur = await nw.locator('.sp-nav .chip[aria-current=page]').bounding_box()
+                check(f'nav at 390px on {path}: all 4 tabs and the active tab fully on screen',
+                      len(boxes) == 4 and all(bx and bx['x'] >= 0 and bx['x'] + bx['width'] <= 390 for bx in boxes) and cur and cur['x'] + cur['width'] <= 390, boxes)
 
             # 2. who brands can find
             await sp.goto(f'{B}/sponsor/fests'); t = await text(sp, 'main')
@@ -133,7 +156,7 @@ async def main():
             names = q(f"select string_agg(distinct u.name, '|') from tickets t join users u on u.id=t.user_id where t.fest_id='{neon}'").split('|')
             check('3. no student name or email in the media kit HTML', not any(n and n in h for n in names) and '@seed.thefest.in' not in h and '@thefest.in' not in h)
             check('3. a college with fewer than 5 attendees is folded into "Other"', 'Tiny SR College' not in h and 'Other' in await text(sp, '.kit-colleges'))
-            check('12. media kit at 390px: no sideways scroll, buttons ≥44px', await no_sideways(sp) and await min_height(sp, 'main .btn') >= 44)
+            check('12. media kit at 390px: no sideways scroll, buttons ≥44px', await no_sideways(sp) and await min_height(sp, 'main .btn, main .chip') >= 44)
 
             # 1. no profile → sent to /sponsor/profile; unverified can browse but not send
             await nw.goto(f'{B}/sponsor/fests/{neon}')
@@ -148,6 +171,9 @@ async def main():
             await nw.fill('input[name=budget_min]', '20000'); await nw.fill('input[name=budget_max]', '300000'); await nw.fill('input[name=cities]', 'Bengaluru, Mysuru')
             await nw.check('input[name=listed]'); await nw.click('button:has-text("Save profile")')
             check('10. brand profile saved and listed', await alert(nw, 'Organizers can now find your brand') and q(f"select listed from brand_profiles where user_id='{nb}'") == 't')
+            await nw.goto(f'{B}/sponsor/requests'); t = await text(nw, 'section[aria-label=Received]')
+            check('Requests empty state (listed) says the brand is listed', 'Your brand is listed' in t, t)
+            await nw.goto(f'{B}/sponsor/profile')
             check('12. profile page at 390px: no sideways scroll, buttons ≥44px', await no_sideways(nw) and await min_height(nw, 'main .btn') >= 44)
 
             # 4/7. brand → fest request, exact paise
@@ -217,21 +243,90 @@ async def main():
                   emails('newbrand@seed.thefest.in', 'sponsorship confirmed') == '1' and 'organizer@thefest.in' in email_bodies('newbrand@seed.thefest.in')
                   and 'newbrand@seed.thefest.in' in q("select body_text from email_outbox where to_email='organizer@thefest.in' and subject like '%confirmed%' order by id desc limit 1"))
 
-            # 11. co-organizer accepts; an existing sponsor row is re-used, never duplicated
+            # tester 1: Volt Energy already sponsors Neon — no request offered either way, and the server refuses one
+            await sp.goto(f'{B}/sponsor/fests/{neon}')
+            check('existing sponsor: media kit says "Already a sponsor of this fest", no request form',
+                  'already a sponsor of this fest' in (await text(sp, '#request')).lower() and await sp.locator('#request textarea').count() == 0)
+            await org.goto(f'{B}/organizer/{neon}/sponsors?to={volt}')
+            vcard = org.locator(f'.brand-card[data-brand="{volt}"]')
+            check('existing sponsor: Find brands says "Already a sponsor of this fest", no Send request',
+                  'already a sponsor of this fest' in (await vcard.inner_text()).lower() and await vcard.locator('a:has-text("Send request")').count() == 0
+                  and await org.locator('#send textarea').count() == 0)
+            n_volt = q(f"select count(*) from sponsor_requests where fest_id='{neon}' and brand_user_id='{volt}'")
+            await sp.goto(f'{B}/sponsor/fests/{kalaa}'); await sp.fill('input[name=amount]', '1000')
+            await sp.evaluate('(n) => document.querySelector("#request input[name=festId]").value = n', neon)
+            await sp.click('button:has-text("Send request")')
+            check('existing sponsor: a tampered brand request is refused server-side', await alert(sp, 'Already a sponsor'))
+            await org.goto(f'{B}/organizer/{neon}/sponsors?to={pitch}'); await org.fill('#send input[name=amount]', '1000')
+            await org.evaluate('(v) => document.querySelector("#send input[name=brandUserId]").value = v', volt)
+            await org.click('#send button:has-text("Send request")')
+            check('existing sponsor: a tampered organizer request is refused server-side', await alert(org, 'Already a sponsor')
+                  and q(f"select count(*) from sponsor_requests where fest_id='{neon}' and brand_user_id='{volt}'") == n_volt)
+
+            # tester 4: open (waiting) requests come first in Requests received
+            q(f"update sponsor_requests set created_at = now() - interval '1 hour' where fest_id='{kalaa}' and brand_user_id='{chai}' and status='withdrawn'")
+            kr = q(f"select id from sponsor_requests where fest_id='{kalaa}' and brand_user_id='{volt}' and status='sent'")
+            await org2.goto(f'{B}/organizer/{kalaa}/sponsors')
+            check('organizer Requests received lists the open request first',
+                  await org2.locator('section[aria-label=Requests] .req-card').first.get_attribute('data-request') == kr)
+
+            # review 2/3 + 11: a request open before the organizer typed the sponsor in by hand (other brand name, same email).
+            # A co-organizer accepts: still one row, now with the profile's brand name and the accepted tier and amount.
+            ch = await login(b, 'brand@seed.thefest.in')
+            await ch.goto(f'{B}/sponsor/fests/{kalaa}'); await ch.select_option('select[name=tier]', 'Title'); await ch.fill('input[name=amount]', '200000')
+            await ch.click('button:has-text("Send request")'); await alert(ch, 'Request sent')
+            vr = q(f"select id from sponsor_requests where fest_id='{kalaa}' and brand_user_id='{chai}' and status='sent'")
+            q(f"insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code) values ('{kalaa}', 'brand@seed.thefest.in', 'Chai Point', 'Associate', 1000000, 'SRCHAI01')")
             co = await login(b, 'coorg@seed.thefest.in')
-            await sp.goto(f'{B}/sponsor/fests/{neon}'); await sp.fill('input[name=amount]', '200000'); await sp.click('button:has-text("Send request")'); await alert(sp, 'Request sent')
-            vr = q(f"select id from sponsor_requests where fest_id='{neon}' and brand_user_id='{volt}' and status='sent'")
-            await co.goto(f'{B}/organizer/{neon}/sponsors')
+            await co.goto(f'{B}/organizer/{kalaa}/sponsors')
             await co.locator(f'[data-request="{vr}"] button:has-text("Accept")').click()
             check('11. co-organizer can accept', await badge(co, vr, 'Accepted') and q(f"select status from sponsor_requests where id='{vr}'") == 'accepted')
-            check('7. accepting for a brand already added re-uses its sponsors row (no duplicate)',
-                  q(f"select count(*) from sponsors where fest_id='{neon}' and email='sponsor@thefest.in'") == '1'
-                  and q(f"select sponsor_id = (select id from sponsors where fest_id='{neon}' and email='sponsor@thefest.in') from sponsor_requests where id='{vr}'") == 't')
-            await co.goto(f'{B}/organizer/{neon}/sponsors?to={chai}')
+            rows = q(f"select id||'|'||brand||'|'||tier||'|'||amount_paise||'|'||booth_code from sponsors where fest_id='{kalaa}' and email='brand@seed.thefest.in'").split('\n')
+            check('7. accept re-uses the sponsor row with the same email (no duplicate, even with another brand name)', len(rows) == 1, rows)
+            sid2 = rows[0].split('|')[0]
+            check('accept updates that row to the profile name and the accepted tier and amount (booth QR kept)',
+                  rows[0].split('|')[1:] == ['Chai Point Express', 'Title', '20000000', 'SRCHAI01'], rows)
+            check('7. request is linked to that sponsor row', q(f"select sponsor_id from sponsor_requests where id='{vr}'") == sid2)
+            await ch.wait_for_timeout(800)
+            body = q("select body_text from email_outbox where to_email='brand@seed.thefest.in' and subject like '%Kalaa%confirmed%' order by id desc limit 1")
+            check('the accepted email matches the sponsor row (Title, ₹2,00,000)', 'Title sponsor' in body and '2,00,000' in body, body[:200])
+            await co.goto(f'{B}/organizer/{kalaa}/sponsors')
+            check('the organizer sponsors list shows the accepted deal', '2,00,000' in await co.locator(f'[data-sponsor="{sid2}"]').inner_text())
+            await co.goto(f'{B}/organizer/{neon}/sponsors?to={pitch}')
             await co.fill('#send input[name=amount]', '15000'); await co.click('#send button:has-text("Send request")')
-            check('11. co-organizer can send a request', await alert(co, 'Request sent to Chai Point Express'))
+            check('11. co-organizer can send a request', await alert(co, 'Request sent to Pitch Perfect'))
 
-            # 4. fest → brand request; 5. fest daily cap; decline + 7-day cool-down
+            # review 1: only approved, live fests shown to brands can pitch; organizers must have a confirmed email
+            await org2.goto(f'{B}/organizer/{hidden["sr-draft"]}/sponsors?to={nb}')
+            check('draft fest: no send form, explains it must be approved and live', await org2.locator('#send textarea').count() == 0
+                  and 'approved your fest' in await text(org2, 'body'))
+            await org2.goto(f'{B}/organizer/{kalaa}/sponsors?to={nb}'); await org2.fill('#send input[name=amount]', '5000')
+            send = await capture_action(org2, lambda: org2.click('#send button:has-text("Send request")'))
+            check('captured the Send request action', bool(send))
+            n_mail = q("select count(*) from email_outbox")
+            for name, f in [('draft', hidden['sr-draft']), ('review', hidden['sr-review'])]:
+                out = await replay(org2.request, swap(send, (kalaa, f)))
+                check(f'sending from a {name} fest is refused (no row, no email)', 'approved your fest' in out
+                      and q(f"select count(*) from sponsor_requests where fest_id='{f}'") == '0' and q("select count(*) from email_outbox") == n_mail)
+            # a live fest, shown to brands, whose owner hasn't confirmed their email
+            q(f"insert into fests (slug, organizer_id, name, college, city, category, starts_on, ends_on, status, open_to_sponsors) select 'sr-unv', '{unorg}', 'Hidden sr-unv', college, city, category, current_date + 5, current_date + 6, 'live', true from fests where id='{kalaa}'")
+            srunv = fid('sr-unv')
+            uo = await login(b, 'unorg@seed.thefest.in')
+            await uo.goto(f'{B}/organizer/{srunv}/sponsors?to={nb}')
+            check('unverified organizer: confirm-email notice with resend instead of the send form',
+                  await uo.locator('#send .verify-notice button:has-text("Send the link again")').count() == 1 and await uo.locator('#send textarea').count() == 0)
+            await replay(uo.request, swap(send, (kalaa, srunv)))
+            check('unverified organizer: a posted request is refused', q(f"select count(*) from sponsor_requests where fest_id='{srunv}'") == '0')
+            ureq = q(f"insert into sponsor_requests (fest_id, brand_user_id, direction, brand, tier, amount_paise, sent_by) values ('{srunv}', '{chai}', 'brand_to_org', 'Chai Point Express', 'Partner', 100000, '{chai}') returning id")
+            await uo.goto(f'{B}/organizer/{srunv}/sponsors')
+            check('unverified organizer: no Accept button', await uo.locator(f'[data-request="{ureq}"]').count() == 1
+                  and await uo.locator(f'[data-request="{ureq}"] button:has-text("Accept")').count() == 0)
+            out = await replay(uo.request, swap(act, (rq, ureq), (neon, srunv)))
+            check('unverified organizer: a posted accept is refused', 'Confirm your email' in out
+                  and q(f"select status from sponsor_requests where id='{ureq}'") == 'sent' and q(f"select count(*) from sponsors where fest_id='{srunv}'") == '0', out[-200:])
+
+            # 4. fest → brand request; 5. fest daily cap; decline + 7-day cool-down (Hackverse is shown to brands for this)
+            q(f"update fests set open_to_sponsors = true where id='{hack}'")
             for i in range(20):
                 q(f"insert into sponsor_requests (fest_id, brand_user_id, direction, brand, tier, amount_paise, status) values ('{hack}', '{chai}', 'org_to_brand', 'X', 'Partner', 0, 'withdrawn')")
             await org.goto(f'{B}/organizer/{hack}/sponsors?to={nb}'); await org.fill('#send input[name=amount]', '50000'); await org.click('#send button:has-text("Send request")')
@@ -257,7 +352,6 @@ async def main():
 
             # 5. brand daily cap; withdraw (sender only, no email)
             await sp.goto(f'{B}/sponsor/requests')
-            kr = q(f"select id from sponsor_requests where fest_id='{kalaa}' and brand_user_id='{volt}' and status='sent'")
             n_mail = q("select count(*) from email_outbox")
             await sp.click(f'[data-request="{kr}"] button:has-text("Withdraw")')
             check('withdraw by the sender', await badge(sp, kr, 'Withdrawn') and q(f"select status from sponsor_requests where id='{kr}'") == 'withdrawn')
@@ -273,20 +367,24 @@ async def main():
             cr = q(f"select id from sponsor_requests where fest_id='{comm}' and brand_user_id='{volt}' and status='sent'")
             await sp.goto(f'{B}/sponsor/requests')
             # the brand's own sent (now withdrawn) request can't be accepted by the brand: point the Accept form at it
-            await sp.evaluate('([a, b]) => document.querySelector(`[data-request="${a}"] input[name=id]`).value = b', [cr, vr])
+            await sp.evaluate('([a, b]) => document.querySelector(`[data-request="${a}"] input[name=id]`).value = b', [cr, kr])
             await sp.click(f'[data-request="{cr}"] button:has-text("Accept")')
             check('6. the sender can\'t accept its own request (server-side)', await alert(sp, 'Only the side that received'))
             await sp.goto(f'{B}/sponsor/requests')
             act2 = await capture_action(sp, lambda: sp.locator(f'[data-request="{cr}"] button:has-text("Accept")').click())
             q(f"update fests set status='cancelled' where id='{comm}'")
             out = await replay(sp.request, act2)
-            check('8. accepting after the fest is cancelled is refused', 'ended or was cancelled' in out and q(f"select status from sponsor_requests where id='{cr}'") == 'sent')
+            check('8. accepting after the fest is cancelled is refused', 'no longer live' in out and q(f"select status from sponsor_requests where id='{cr}'") == 'sent')
             await sp.goto(f'{B}/sponsor/requests')
             check('8. the request reads "Expired" with no Accept', await sp.locator(f'[data-request="{cr}"]', has_text='Expired').count() == 1
                   and await sp.locator(f'[data-request="{cr}"] button:has-text("Accept")').count() == 0)
             q(f"update fests set status='live', starts_on=current_date-3, ends_on=current_date-1 where id='{comm}'")
             out = await replay(sp.request, act2)
-            check('8. accepting after the fest has ended is refused', 'ended or was cancelled' in out and q(f"select status from sponsor_requests where id='{cr}'") == 'sent')
+            check('8. accepting after the fest has ended is refused', 'no longer live' in out and q(f"select status from sponsor_requests where id='{cr}'") == 'sent')
+            q(f"update fests set status='draft', starts_on=current_date+34, ends_on=current_date+35 where id='{comm}'")
+            out = await replay(sp.request, act2)
+            check('8. accepting after the fest went back to draft is refused', 'no longer live' in out and q(f"select status from sponsor_requests where id='{cr}'") == 'sent')
+            q(f"update fests set status='live' where id='{comm}'")
             q(f"update fests set starts_on=current_date+34, ends_on=current_date+35 where id='{comm}'")  # live again for the next check
             await sp.goto(f'{B}/sponsor/requests')
             await sp.evaluate('(a) => document.querySelector(`[data-request="${a}"] input[name=do]`).value = "withdraw"', cr)
@@ -297,7 +395,7 @@ async def main():
             check('no page errors', not errs, errs[:3])
             await b.close()
 
-        # 13. old database without v2.6: pages load and say "not set up yet"
+        # 13. old database without v2.6: pages load and say "not switched on yet"
         sh('dropdb -h /tmp -U postgres --if-exists thefest_v25 && createdb -h /tmp -U postgres thefest_v25 && '
            'pg_dump -h /tmp -U postgres thefest | psql -q -h /tmp -U postgres thefest_v25 >/dev/null 2>&1')
         OLD = 'psql -h /tmp -U postgres thefest_v25'
@@ -312,18 +410,18 @@ async def main():
                 s2 = await login(b, 'sponsor@thefest.in', S.base)
                 for path in ['/sponsor', '/sponsor/requests', '/sponsor/fests', '/sponsor/profile']:
                     r = await s2.goto(S.base + path)
-                    ok = r.status == 200 and (path == '/sponsor' or 'not set up yet' in await text(s2, 'main'))
-                    check(f'13. old database: {path} loads' + ('' if path == '/sponsor' else ' and says "not set up yet"'), ok, r.status)
+                    ok = r.status == 200 and (path == '/sponsor' or 'not switched on yet' in await text(s2, 'main'))
+                    check(f'13. old database: {path} loads' + ('' if path == '/sponsor' else ' and says "not switched on yet"'), ok, r.status)
                 o2 = await login(b, 'organizer@thefest.in', S.base)
                 r = await o2.goto(f'{S.base}/organizer/{neon}/sponsors')
-                check('13. old database: organizer sponsors tab loads and says "not set up yet"', r.status == 200 and 'not set up yet' in await text(o2), r.status)
+                check('13. old database: organizer sponsors tab loads and says "not switched on yet"', r.status == 200 and 'not switched on yet' in await text(o2), r.status)
                 await b.close()
         finally:
             S.stop(); sh('dropdb -h /tmp -U postgres --if-exists thefest_v25')
     finally:
         q(f"update users set college={'NULL' if not tiny_old else chr(39) + tiny_old + chr(39)} where id='{tiny}'")
         q("delete from fests where slug like 'sr-%'")
-        q(f"update fests set open_to_sponsors = false where id in ('{goal}', '{beats}')")
+        q(f"update fests set open_to_sponsors = false where id in ('{goal}', '{beats}', '{hack}')")
         q(f"update fests set status='{comm_old[0]}', starts_on='{comm_old[1]}', ends_on='{comm_old[2]}' where id='{comm}'")
         q("delete from sponsor_requests where brand='X'")
 

@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
-import { rupees, slugify, todayIST } from '@/lib/format';
+import { rupees, slugify } from '@/lib/format';
 import { cancelFest, refundOrder } from '@/lib/refunds';
 import { OrderError } from '@/lib/orders';
 import { boothCode } from '@/lib/ticket-crypto';
@@ -14,7 +14,9 @@ import { leadsReady } from '@/lib/sponsor-leads';
 import { siteUrl } from '@/lib/env';
 import { afterResponse } from '@/lib/errors';
 import { notifySponsorRequest, sendEmail } from '@/lib/mail';
-import { REQUESTS_MISSING, createRequest, decideRequest, parseRequestFields, requestsReady, type Decision } from '@/lib/sponsor-requests';
+import {
+  REQUESTS_MISSING, SEND_NEEDS_LIVE, createRequest, decideRequest, parseRequestFields, requestsReady, visibleToBrands, type Decision,
+} from '@/lib/sponsor-requests';
 import { matchCredits, confirmManually, rejectUpiOrder as rejectUpi, newInboundToken } from '@/lib/upi';
 import { parseAlerts, parseCsv, parseStatement, VPA_RE, type Credit } from '@/lib/upi-parse';
 import type { MatchResult } from '@/lib/upi';
@@ -327,8 +329,10 @@ export async function sendBrandRequest(_: ActionState, fd: FormData): Promise<Ac
   if (!(await requestsReady())) return { error: REQUESTS_MISSING };
   const brandUserId = s(fd, 'brandUserId');
   if (!isUuid(brandUserId)) return { error: 'Brand not found.' };
-  const [f] = await sql`select 1 from fests where id = ${fest.id} and status not in ('cancelled', 'ended') and ends_on >= ${todayIST()}`;
-  if (!f) return { error: 'This fest has ended or was cancelled.' };
+  if (!user.verified) return { error: 'Confirm your email first.' };
+  // Only fests THE FEST approved (live) and shown to brands can pitch — the brand can then open the fest's media kit.
+  const [f] = await sql<{ visible: boolean }[]>`select ${visibleToBrands()} as visible from fests f where f.id = ${fest.id}`;
+  if (!f?.visible) return { error: SEND_NEEDS_LIVE };
   const [b] = await sql<{ brand: string }[]>`
     select p.brand from brand_profiles p join users u on u.id = p.user_id where p.user_id = ${brandUserId} and p.listed and u.role = 'sponsor'`;
   if (!b) return { error: 'This brand is not taking requests right now.' };

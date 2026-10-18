@@ -36,9 +36,15 @@ export default async function SponsorHome() {
 
         {!user.verified && <VerifyNotice email={user.email} />}
         {rows.length === 0 ? (
-          <Empty icon="🏷️" title="No sponsorships linked yet">
-            When a fest organizer adds <strong>{user.email}</strong> as a sponsor, it appears here automatically.
-          </Empty>
+          <>
+            <Empty icon="🏷️" title="No sponsorships linked yet">
+              Find a fest to sponsor, or let organizers find you. When a fest adds <strong>{user.email}</strong> as a sponsor, it appears here.
+            </Empty>
+            <div className="row g8 wrap-row sp-start">
+              <Link className="btn blue grow" href="/sponsor/fests">Find fests</Link>
+              <Link className="btn outline grow" href="/sponsor/profile">Brand profile</Link>
+            </div>
+          </>
         ) : (
           <>
             <div className="grid-2 grid-3">
