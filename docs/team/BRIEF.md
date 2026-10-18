@@ -56,6 +56,21 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   lunch/stay add-ons are **refunded automatically** in the same refund (money returned once) — the student can't use them any more.
 - Efficiency: Harshith's weekly limit is tight — plans lean, few agent rounds, full team only for big features.
 
+## Smart QR (Oct 18, 2026)
+- Harshith: "the trick here is not just about the QR code itself, but the scanner." A normal phone scanner must show
+  **the basic details**; THE FEST scanner reveals **more, depending on who is scanning**. He wants it unique and patentable.
+- Harshith said "Yess" to the plan: QR becomes a normal web link → public page (fest, date, holder first name, ticket type,
+  valid/verified, nothing private); sealed sections inside the link (after `#`), one per role (gate / lunch / stay /
+  first aid (student opt-in) / organizer), opened **offline** only by a scanner of that role; live status added when
+  online; optional rotating anti-screenshot QR. Plus a 2-page invention note for a patent attorney.
+- Patent: prior art exists (Denso SQRC public/private QR) — novelty is the combination; **don't show it publicly before
+  filing** a provisional application. Not legal advice; attorney to judge.
+- Harshith's answers (Oct 18, 2026, after the build started):
+  1. Patent: "Don't care about patent" — push and deploy normally; the public repo is fine (no invention note needed).
+  2. First aid: "Skip first aid for now" — remove the first-aid card/opt-in, `medical_profiles` table (never shipped),
+     first-aid scanner role and related UI. Gate / lunch / stay / organizer sections stay.
+  3. Old screenshots at the gate: **warn only** (as built), do not block.
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.
