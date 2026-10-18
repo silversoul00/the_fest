@@ -101,7 +101,7 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
         }
         let r: Response;
         try {
-          r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId: q.festId, gate: q.gate, counter: q.counter, payload: q.payload }), signal: AbortSignal.timeout(8000) });
+          r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId: q.festId, gate: q.gate, counter: q.counter, payload: q.payload }), signal: timeoutSignal(8000) });
         } catch { break; }
         if (r.status === 401) { await locked(); break; }
         const isJson = (r.headers.get('content-type') ?? '').includes('application/json');
@@ -414,4 +414,12 @@ function RoleCard({ card, live, startsOn, showName }: { card: Card; live: LiveSt
       {card.org && <div data-role="org" className="small">Holder phone: <a href={`tel:${card.org}`}>{card.org}</a></div>}
     </div>
   );
+}
+
+/** An abort signal that fires after `ms`; works on older phones that lack AbortSignal.timeout (Chrome < 103, iOS < 16). */
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) return AbortSignal.timeout(ms);
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
 }

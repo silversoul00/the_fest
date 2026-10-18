@@ -70,7 +70,7 @@ export function utf8Max(s: string, max: number, atWord = true): Uint8Array {
     if (/\s/.test(g)) lastSpace = out.length;
     out += g;
   }
-  if (atWord && lastSpace > 0) out = out.slice(0, lastSpace);
+  if (atWord && lastSpace >= out.length / 2) out = out.slice(0, lastSpace); // don't cut back to a lone initial
   return utf8(out.trimEnd() + '…');
 }
 
