@@ -10,9 +10,10 @@
  *   L (optional, 4 bytes) = live code, changes every 30 s (only on the ticket screen)
  */
 
-export const ROLES = ['gate', 'lunch', 'stay', 'aid', 'org'] as const;
+export const ROLES = ['gate', 'lunch', 'stay', 'org'] as const;
 export type SealRole = (typeof ROLES)[number];
-export const ROLE_ID: Record<SealRole, number> = { gate: 1, lunch: 2, stay: 3, aid: 4, org: 5 };
+// Ids are fixed forever: 4 is retired (Oct 18, 2026) — never reuse it.
+export const ROLE_ID: Record<SealRole, number> = { gate: 1, lunch: 2, stay: 3, org: 5 };
 export const P_LEN = 24;
 export const NONCE_LEN = 12;
 export const SIG_LEN = 64;
@@ -20,9 +21,6 @@ export const TAG_LEN = 4;
 export const LIVE_STEP_SECONDS = 30;
 export const NAME_MAX = 20;      // bytes (UTF-8)
 export const TYPE_MAX = 12;      // bytes
-export const ALLERGY_MAX = 16;   // bytes
-export const BLOOD_GROUPS = ['unknown', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
-export type BloodGroup = (typeof BLOOD_GROUPS)[number];
 
 // ─── base64url (canonical: a string that doesn't re-encode to itself is rejected) ───
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -161,13 +159,6 @@ export function lunchToday(mask: number, startsOn: string, today: string) {
 
 export const encStay = (stay: boolean) => Uint8Array.of(stay ? 1 : 0);
 export const decStay = (b: Uint8Array) => (b[0] & 1) === 1;
-
-export type AidData = { blood: BloodGroup; phone: string; allergies: string };
-export const encAid = (a: AidData) => concat(Uint8Array.of(Math.max(0, BLOOD_GROUPS.indexOf(a.blood))), bcd(a.phone), utf8Max(a.allergies, ALLERGY_MAX));
-export function decAid(b: Uint8Array): AidData | null {
-  if (b.length < 6) return null;
-  return { blood: BLOOD_GROUPS[b[0]] ?? 'unknown', phone: unbcd(b.slice(1, 6)), allergies: fromUtf8(b.slice(6)) };
-}
 
 export const encOrg = (phone: string) => bcd(phone);
 export const decOrg = (b: Uint8Array) => (b.length === 5 ? unbcd(b) : null);

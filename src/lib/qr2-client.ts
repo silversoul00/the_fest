@@ -3,9 +3,9 @@
  * The scanner verifies the ECDSA signature first, then opens only the sections it holds keys for.
  */
 import {
-  LIVE_WINDOW, ROLE_ID, ROLES, decAid, decGate, decLunch, decOrg, decStay, isTf2Text, liveStep, parseF, parseP,
+  LIVE_WINDOW, ROLE_ID, ROLES, decGate, decLunch, decOrg, decStay, isTf2Text, liveStep, parseF, parseP,
   signedMessage, splitTf2, stepBytes, unb64u, utf8, bytesUuid,
-  type AidData, type SealRole,
+  type SealRole,
 } from './qr2-format.ts';
 
 export type KeysJson = {
@@ -25,7 +25,7 @@ export type Opened =
   | { kind: 'tf1'; ticketId: string }
   | {
       kind: 'ok'; ticketId: string; epoch: number; live: LiveState | null;
-      gate?: { name: string; type: string }; lunch?: number; stay?: boolean; aid?: AidData; org?: string;
+      gate?: { name: string; type: string }; lunch?: number; stay?: boolean; org?: string;
     };
 
 const subtle = () => globalThis.crypto.subtle;
@@ -85,7 +85,6 @@ export async function openTicket(text: string, b: Bundle, nowMs = Date.now()): P
     if (role === 'gate') { const g = decGate(plain); if (g) { out.gate = { name: g.name, type: g.type }; secret = g.liveSecret; } }
     if (role === 'lunch') out.lunch = decLunch(plain);
     if (role === 'stay') out.stay = decStay(plain);
-    if (role === 'aid') { const a = decAid(plain); if (a) out.aid = a; }
     if (role === 'org') { const o = decOrg(plain); if (o) out.org = o; }
   }
   if (secret) {

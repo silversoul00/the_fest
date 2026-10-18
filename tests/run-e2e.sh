@@ -66,6 +66,6 @@ python3 tests/throttle.py
 # money with a fake Cashfree, 200-way login bursts, 60 rotating networks, admin "Unlock a login" abuse and odd emails,
 # missing tables/columns, Part 2a on old databases, error-log bursts and pruning, /setup/keys, 390/1280 screenshots
 python3 tests/round2.py
-# Smart QR (2026-10-18): public /t/ page, sealed sections per scanner role offline, live code, key reset, first-aid card
+# Smart QR (2026-10-18): public /t/ page, sealed sections per scanner role offline, live code, key reset, offline sync (fix round 1: first aid removed, sync resilience, lunch day, lock)
 python3 tests/smartqr.py
 echo "✓ Release check passed"

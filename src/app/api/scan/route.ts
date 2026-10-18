@@ -1,10 +1,10 @@
 import { getScanner } from '@/lib/auth';
 import { body, fail, isUuid, json, sameOrigin } from '@/lib/http';
 import { scannableFests } from '@/lib/queries';
-import { aidStatus, checkIn, counterFor, liveOf, perkCounts, redeemPerk, type Counter } from '@/lib/scan';
+import { checkIn, counterFor, liveOf, perkCounts, redeemPerk, type Counter } from '@/lib/scan';
 import { sql } from '@/lib/db';
 
-const COUNTERS: Counter[] = ['gate', 'lunch', 'stay', 'aid'];
+const COUNTERS: Counter[] = ['gate', 'lunch', 'stay'];
 
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return fail('Bad origin', 403);
@@ -27,10 +27,6 @@ export async function POST(req: Request) {
     : counterFor(rows[0].duty);
 
   const live = liveOf(b.payload);
-  if (counter === 'aid') {
-    const verdict = await aidStatus({ festId: b.festId, scannerId: scanner.id, payload: b.payload, code: b.code });
-    return json({ ...verdict, counter, live });
-  }
   if (counter !== 'gate') {
     const verdict = await redeemPerk({ festId: b.festId, scannerId: scanner.id, counter, payload: b.payload, code: b.code });
     return json({ ...verdict, counter, live, counts: await perkCounts(b.festId, scanner.id, counter) });

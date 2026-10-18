@@ -3,9 +3,9 @@ import { createCipheriv, createHmac, hkdfSync, randomBytes, sign, timingSafeEqua
 import type postgres from 'postgres';
 import { privateKey, publicKey } from './ticket-crypto.ts';
 import {
-  LIVE_WINDOW, NONCE_LEN, ROLES, ROLE_ID, TAG_LEN, encAid, encGate, encLunch, encOrg, encStay, liveStep, packP,
+  LIVE_WINDOW, NONCE_LEN, ROLES, ROLE_ID, TAG_LEN, encGate, encLunch, encOrg, encStay, liveStep, packP,
   packSections, parseF, parseP, signedMessage, splitTf2, stepBytes, tf2Url, unb64u, uuidBytes,
-  type AidData, type Section, type SealRole,
+  type Section, type SealRole,
 } from './qr2-format.ts';
 
 /*
@@ -40,7 +40,7 @@ export const prevEpoch = (e: number) => ((e + 253) % 255) + 1;
 export type TicketSeal = {
   ticketId: string; festId: string; epoch: number;
   name: string; type: string; startsOn: string; endsOn: string; lunchDays: string[]; stay: boolean;
-  aid: AidData | null; holderPhone: string | null;
+  holderPhone: string | null;
 };
 
 function seal(key: Buffer, nonce: Buffer, aad: Uint8Array, plain: Uint8Array): Uint8Array {
@@ -59,7 +59,6 @@ export function sealTicket(site: string, t: TicketSeal): { url: string; liveSecr
     ['lunch', encLunch(t.startsOn, t.endsOn, t.lunchDays)],
     ['stay', encStay(t.stay)],
   ];
-  if (t.aid) plain.push(['aid', encAid(t.aid)]);
   const phone = (t.holderPhone ?? '').replace(/\D/g, '');
   if (phone.length >= 10) plain.push(['org', encOrg(phone)]);
   const sections: Section[] = plain.map(([role, data]) => ({ role: ROLE_ID[role], ct: seal(roleKey(t.festId, role, t.epoch), nonce, p, data) }));
@@ -116,7 +115,7 @@ export function scannerKeys(festId: string, roles: readonly SealRole[], epoch: n
 export async function ticketSealData(sql: postgres.Sql, ticketId: string): Promise<TicketSeal | null> {
   const [r] = await sql<{
     id: string; fest_id: string; holder_name: string; type_name: string; starts_on: string; ends_on: string; qr_epoch: number;
-    phone: string | null; own: boolean; blood_group: string | null; allergies: string | null; emergency_phone: string | null;
+    phone: string | null;
     days: string; stay: boolean;
   }[]>`
     with p as (
@@ -126,19 +125,15 @@ export async function ticketSealData(sql: postgres.Sql, ticketId: string): Promi
       where o.addon_for = ${ticketId} and o.status = 'paid'
     )
     select t.id, t.fest_id, t.holder_name, tt.name as type_name, f.starts_on, f.ends_on, f.qr_epoch, u.phone,
-           (t.holder_name not like '% (%/%)') as own, m.blood_group, m.allergies, m.emergency_phone,
            coalesce((select string_agg(distinct d::text, ',') from p, unnest(p.lunch_days) d), '') as days,
            coalesce((select bool_or(includes_stay) from p), false) as stay
     from tickets t join ticket_types tt on tt.id = t.ticket_type_id join fests f on f.id = t.fest_id
-      join users u on u.id = t.user_id left join medical_profiles m on m.user_id = t.user_id
+      join users u on u.id = t.user_id
     where t.id = ${ticketId}`;
   if (!r) return null;
   return {
     ticketId: r.id, festId: r.fest_id, epoch: r.qr_epoch, name: r.holder_name, type: r.type_name,
     startsOn: r.starts_on, endsOn: r.ends_on, lunchDays: r.days ? r.days.split(',') : [], stay: r.stay,
-    // The first-aid card is the account holder's, so it rides only on their own tickets — not on "Name (2/3)" tickets bought for friends.
-    aid: r.blood_group && r.emergency_phone && r.own
-      ? { blood: r.blood_group as AidData['blood'], phone: r.emergency_phone, allergies: r.allergies ?? '' } : null,
     holderPhone: r.phone,
   };
 }

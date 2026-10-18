@@ -2,11 +2,12 @@
  * Scanner phone storage (IndexedDB):
  *  keys  — festId → offline key bundle (non-extractable CryptoKeys). Wiped on Lock, on a 401 and when expired.
  *  seen  — "festId:ticketId:slot" → time, so the same ticket twice on this phone offline says "Already in (this phone)".
- *  queue — offline scans waiting to be sent to /api/scan when the phone is back online.
+ *  queue — offline scans waiting to be sent to /api/scan when the phone is back online (only under the same login).
  */
 const DB = 'thefest-scan';
 export type Store = 'keys' | 'seen' | 'queue';
-export type Queued = { festId: string; gate: string; counter: string; payload: string; at: number };
+/** by = the scanner user who made the scan; only that user's login syncs it. at = scan time (lunch is per IST day). */
+export type Queued = { festId: string; gate: string; counter: string; payload: string; at: number; by: string };
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

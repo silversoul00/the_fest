@@ -17,11 +17,10 @@ export type Verdict = {
 };
 
 /** Which desk a volunteer works: comes from their duty, set by the organizer. */
-export type Counter = 'gate' | 'lunch' | 'stay' | 'aid';
+export type Counter = 'gate' | 'lunch' | 'stay';
 export function counterFor(duty: string | null | undefined): Counter {
   const d = (duty ?? '').trim().toLowerCase();
   if (d.startsWith('lunch')) return 'lunch';
-  if (d.startsWith('first aid') || d.startsWith('first-aid') || d.startsWith('medical')) return 'aid';
   if (d.startsWith('stay') || d.startsWith('hostel')) return 'stay';
   return 'gate';
 }
@@ -198,22 +197,6 @@ export function liveOf(payload: string | undefined): Live | null {
   if (!payload || !isTf2Text(payload)) return null;
   const v = verifyTf2(payload);
   return v.ok ? v.live : null;
-}
-
-/**
- * First-aid desk: only says whether the ticket is real and for this fest. Never redeems anything and never
- * returns medical data — that travels only sealed inside the QR, opened on the first-aid volunteer's phone.
- */
-export async function aidStatus(opts: { festId: string; scannerId: string; payload?: string; code?: string }): Promise<Verdict> {
-  const r = await resolveTicket({ ...opts, logAs: null });
-  if ('verdict' in r) return r.verdict;
-  const [t] = await sql<{ status: string; holder_name: string; code: string; type: string; checked_in_at: Date | null }[]>`
-    select t.status, t.holder_name, t.code, tt.name as type, t.checked_in_at
-    from tickets t join ticket_types tt on tt.id = t.ticket_type_id where t.id = ${r.ticketId} and t.fest_id = ${opts.festId}`;
-  if (!t) return { result: 'invalid', message: 'Ticket not found' };
-  const who = { holder: t.holder_name, type: t.type, code: t.code };
-  if (t.status === 'void') return { result: 'void', message: 'This ticket was cancelled', ...who };
-  return { result: 'admitted', message: t.checked_in_at ? `Valid ticket · checked in at ${time(t.checked_in_at)}` : 'Valid ticket · not checked in yet', ...who };
 }
 
 /** Scanner header numbers for a lunch/stay desk: today's uses at this fest, and by this volunteer. */

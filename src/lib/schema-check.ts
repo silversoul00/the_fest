@@ -19,8 +19,6 @@ export const REQUIRED_TABLES = [
   'login_attempts', 'app_errors', 'app_alert_state',
   // v2.3 (scanner counters)
   'perk_redemptions',
-  // v2.4 (Smart QR)
-  'medical_profiles',
 ] as const;
 
 export const REQUIRED_COLUMNS = [

@@ -7,7 +7,7 @@ import { lunchToday, splitTf2 } from '@/lib/qr2-format.ts';
 import { idbAll, idbClear, idbDel, idbGet, idbPut, type Queued } from './offline-store';
 
 type Counts = { inn: number; total: number; mine: number };
-type Counter = 'gate' | 'lunch' | 'stay' | 'aid';
+type Counter = 'gate' | 'lunch' | 'stay';
 type Verdict = {
   result: 'admitted' | 'duplicate' | 'invalid' | 'wrong_fest' | 'void' | 'offline';
   message: string; holder?: string; type?: string; code?: string; checkedInAt?: string; gate?: string | null;
@@ -20,14 +20,15 @@ const TITLE: Record<Counter, Record<Verdict['result'], string>> = {
   gate: { admitted: '✓ Admit', duplicate: '⚠ Already in', invalid: '✕ Invalid', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled', offline: '✓ Admit (offline)' },
   lunch: { admitted: '✓ Lunch', duplicate: '⚠ Already had lunch', invalid: '✕ No lunch', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled', offline: '✓ Lunch (offline)' },
   stay: { admitted: '✓ Stay', duplicate: '⚠ Already checked out', invalid: '✕ No stay', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled', offline: '✓ Stay (offline)' },
-  aid: { admitted: '✓ Valid ticket', duplicate: '⚠ Check', invalid: '✕ Invalid', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled', offline: '✚ First aid (offline)' },
 };
-const COUNTER_LABEL: Record<Counter, string> = { gate: 'Gate', lunch: 'Lunch counter', stay: 'Stay desk', aid: 'First aid' };
+const COUNTER_LABEL: Record<Counter, string> = { gate: 'Gate', lunch: 'Lunch counter', stay: 'Stay desk' };
 const LIVE_LABEL: Record<LiveState, string> = { live: 'Live ✓', stale: 'Old screenshot', static: 'Static (print/screenshot)' };
-const todayIST = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+const istDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+const todayIST = () => istDay(Date.now());
+const RETRY_MS = 30_000;
 const looksLikePayload = (v: string) => /^TF1\./i.test(v.trim()) || /\/t\/[A-Za-z0-9_-]/.test(v);
 
-/** Wipe this phone's offline keys (Lock, logout, 401). Queued scans stay so they still sync after logging in again. */
+/** Wipe this phone's offline keys (Lock, logout, 401). Queued scans stay; each one only syncs when the volunteer who made it logs in again. */
 export async function wipeScannerKeys() { try { await idbClear('keys'); } catch {} }
 
 declare class BarcodeDetector {
@@ -48,10 +49,10 @@ function feedback(ok: boolean) {
   } catch {}
 }
 
-export function Scanner({ counter, canPick, fests, festId, festName, defaultGate, volunteer, initialCounts, lockAction }: {
+export function Scanner({ counter, canPick, fests, festId, festName, defaultGate, volunteer, scannerId, initialCounts, lockAction }: {
   counter: Counter; canPick: boolean;
   fests: { id: string; name: string; duty: string | null }[]; festId: string; festName: string; defaultGate: string;
-  volunteer: string; initialCounts: Counts; lockAction: () => Promise<void>;
+  volunteer: string; scannerId: string; initialCounts: Counts; lockAction: () => Promise<void>;
 }) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -69,36 +70,73 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
   const bundleRef = useRef<Bundle | null>(null);
   const [card, setCard] = useState<Card | null>(null);
   const [queued, setQueued] = useState(0);
+  const [others, setOthers] = useState(0);
   const syncing = useRef(false);
 
   const applyBundle = (b: Bundle | null) => { bundleRef.current = b; setBundle(b); };
   const locked = useCallback(async () => { await wipeScannerKeys(); router.replace('/scan/login'); }, [router]);
-  const countQueue = () => idbAll('queue').then((q) => setQueued(q.length)).catch(() => {});
+  const countQueue = () => idbAll<Queued>('queue').then((q) => {
+    const mine = q.filter((x) => x.value.by === scannerId).length;
+    setQueued(mine); setOthers(q.length - mine);
+    return mine;
+  }).catch(() => 0);
 
   // Send scans saved offline. The server decides; a ticket used at another gate shows "Synced: was already used".
+  // A queued scan is removed only after a clear answer from our server (a verdict, or a 400/403 refusal). A timeout,
+  // 5xx, 429 or a Wi-Fi login page (not JSON) keeps it and stops — the timer below tries again.
+  // Only this volunteer's own scans are sent, so they are never counted under someone else's name.
   const sync = useCallback(async () => {
     if (syncing.current || !navigator.onLine) return;
     syncing.current = true;
     try {
       for (const { key, value: q } of await idbAll<Queued>('queue')) {
+        if (q.by !== scannerId) continue;
+        const note0 = (v: Partial<Verdict>, note: string) =>
+          setFeed((f) => [{ ...v, result: v.result ?? 'invalid', message: v.message ?? '', at: Date.now() + Math.random(), note }, ...f].slice(0, 12));
+        // Lunch is per day: a lunch saved offline yesterday must not use up today's lunch.
+        if (q.counter === 'lunch' && istDay(q.at) !== todayIST()) {
+          await idbDel('queue', key);
+          note0({ result: 'invalid' }, `Not recorded: lunch from ${istDay(q.at)} (synced on a later day)`);
+          continue;
+        }
         let r: Response;
         try {
           r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId: q.festId, gate: q.gate, counter: q.counter, payload: q.payload }) });
         } catch { break; }
         if (r.status === 401) { await locked(); break; }
-        const v: Verdict = await r.json().catch(() => ({ result: 'invalid', message: 'Scan failed' }));
+        const isJson = (r.headers.get('content-type') ?? '').includes('application/json');
+        const v = isJson ? await r.json().catch(() => null) as (Verdict | null) : null;
+        const verdict = r.ok && v && typeof v.result === 'string';
+        const refused = (r.status === 400 || r.status === 403) && v && typeof v.error === 'string';
+        if (!verdict && !refused) break; // not a clear answer: keep this and the rest for the next try
         await idbDel('queue', key);
-        const note = v.result === 'admitted' ? `Synced ✓ ${v.holder ?? ''}`
-          : v.result === 'duplicate' ? `Synced: was already used${v.gate ? ` at ${v.gate}` : ''}${v.checkedInAt ? ` ${new Date(v.checkedInAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}` : ''} — ${v.holder ?? ''}`
-          : `Synced: ${v.message ?? v.error ?? 'not accepted'}`;
-        setFeed((f) => [{ ...v, result: v.result ?? 'invalid', message: v.message ?? v.error ?? '', at: Date.now() + Math.random(), note }, ...f].slice(0, 12));
-        if (v.counts && q.festId === festId) setCounts(v.counts);
+        const note = !verdict ? `Not accepted: ${v!.error}`
+          : v!.result === 'admitted' ? `Synced ✓ ${v!.holder ?? ''}`
+          : v!.result === 'duplicate' ? `Synced: was already used${v!.gate ? ` at ${v!.gate}` : ''}${v!.checkedInAt ? ` ${new Date(v!.checkedInAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}` : ''} — ${v!.holder ?? ''}`
+          : `Synced: ${v!.message ?? 'not accepted'}`;
+        note0({ ...v!, message: v!.message ?? v!.error ?? '' }, note);
+        if (v!.counts && q.festId === festId) setCounts(v!.counts);
       }
     } finally {
       syncing.current = false;
       countQueue();
     }
-  }, [festId, locked]);
+  }, [festId, locked, scannerId]);
+
+  // Retry on a timer while scans wait: "online" may never fire when the phone has Wi-Fi but a login page blocks it.
+  useEffect(() => {
+    const id = setInterval(() => { if (navigator.onLine) countQueue().then((n) => { if (n) sync(); }); }, RETRY_MS);
+    return () => clearInterval(id);
+  }, [sync]);
+
+  /** Lock: send this volunteer's waiting scans first; if some can't go yet, say so before locking. */
+  const lock = async () => {
+    await sync();
+    const left = await countQueue();
+    if (left && !window.confirm(`${left} scan${left > 1 ? 's' : ''} not synced yet. ${left > 1 ? 'They stay' : 'It stays'} on this phone and ${left > 1 ? 'sync' : 'syncs'} next time ${volunteer} logs in here. Lock anyway?`)) return;
+    await wipeScannerKeys();
+    await lockAction();
+  };
 
   useEffect(() => {
     const up = () => { setOnline(navigator.onLine); if (navigator.onLine) sync(); };
@@ -138,7 +176,7 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
     feedback(ok);
   }, []);
 
-  /** Offline: decide on this phone and queue the scan for later (lunch/stay/gate); first aid only reads. */
+  /** Offline: decide on this phone and queue the scan for later (gate/lunch/stay). */
   const offline = useCallback(async (text: string, opened: Opened | null) => {
     const b = bundleRef.current;
     if (!b || !opened) return show({ result: 'invalid', message: 'No connection — and this phone has no offline keys yet. Open the scanner while online first.' }, false);
@@ -146,14 +184,13 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
     if (opened.kind === 'tampered') return show({ result: 'invalid', message: 'Fake or tampered ticket' }, false);
     if (opened.kind === 'wrong_fest') return show({ result: 'wrong_fest', message: 'Not a ticket for this fest' }, false);
     if (opened.kind === 'needs_network') return show({ result: 'invalid', message: 'Can’t read offline — needs network' }, false);
-    if (counter === 'aid') return show({ result: 'offline', message: opened.kind === 'ok' && opened.aid ? 'First-aid card · nothing recorded' : 'No first-aid card on this ticket · nothing recorded' }, true);
     if (opened.kind === 'tf1' && counter !== 'gate') return show({ result: 'invalid', message: 'Old-style ticket — needs network at this counter' }, false);
 
     const once = async (slot: string, okMsg: string, dupMsg: string) => {
       const key = `${festId}:${opened.ticketId}:${slot}`;
       if (await idbGet('seen', key)) { show({ result: 'duplicate', message: dupMsg }, false); return false; }
       await idbPut('seen', Date.now(), key);
-      await idbPut('queue', { festId, gate, counter, payload: text, at: Date.now() } satisfies Queued);
+      await idbPut('queue', { festId, gate, counter, payload: text, at: Date.now(), by: scannerId } satisfies Queued);
       countQueue();
       show({ result: 'offline', message: okMsg }, true);
       return true;
@@ -168,7 +205,7 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
     if (!opened.stay) return show({ result: 'invalid', message: 'No stay on this ticket' }, false);
     if (!(await idbGet('seen', `${festId}:${opened.ticketId}:stay_in`))) return void once('stay_in', 'Stay: checked in — saved, will sync', '');
     return void once('stay_out', 'Stay: checked out — saved, will sync', 'Already checked out (this phone)');
-  }, [festId, gate, counter, show]);
+  }, [festId, gate, counter, show, scannerId]);
 
   const submit = useCallback(async (data: { payload?: string; code?: string }) => {
     if (busy.current) return;
@@ -237,7 +274,7 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
           const now = Date.now();
           const id = splitTf2(value)?.p ?? value;
           // Same ticket still in frame. Lunch/stay desks wait longer so a held-up QR isn't used twice (stay: in, then out).
-          if (id === last.current.v && now - last.current.t < (counter === 'gate' || counter === 'aid' ? 4000 : 60000)) return;
+          if (id === last.current.v && now - last.current.t < (counter === 'gate' ? 4000 : 60000)) return;
           last.current = { v: id, t: now };
           submit({ payload: value });
         }
@@ -260,7 +297,7 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
       <header className="topbar">
         <div className="wrap topbar-in">
           <span className="logo" style={{ fontSize: 20, color: 'var(--green)' }}>{counter === 'gate' ? 'GATE SCANNER' : COUNTER_LABEL[counter].toUpperCase()}</span>
-          <form action={async () => { await wipeScannerKeys(); await lockAction(); }}><button className="btn sm outline" type="submit">🔒 Lock</button></form>
+          <form action={lock}><button className="btn sm outline" type="submit">🔒 Lock</button></form>
         </div>
       </header>
 
@@ -285,13 +322,15 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
           {canPick && (
             <select className="select" style={{ width: 150 }} value={counter} aria-label="Counter"
               onChange={(e) => router.replace(`/scan?fest=${festId}&counter=${e.target.value}`)}>
-              {(['gate', 'lunch', 'stay', 'aid'] as const).map((c) => <option key={c} value={c}>{COUNTER_LABEL[c]}</option>)}
+              {(['gate', 'lunch', 'stay'] as const).map((c) => <option key={c} value={c}>{COUNTER_LABEL[c]}</option>)}
             </select>
           )}
         </div>
 
         {bundle && <p className="xs c-green" data-offline-ready>Offline ready — keep this page open{queued ? ` · ${queued} scan${queued > 1 ? 's' : ''} waiting to sync` : ''}</p>}
-        {counter === 'aid' ? null : counter !== 'gate' ? (
+        {queued > 0 && online && <button className="btn sm outline" type="button" data-sync-now onClick={() => sync()}>Sync {queued} waiting scan{queued > 1 ? 's' : ''} now</button>}
+        {others > 0 && <p className="xs muted" data-others-queued>{others} scan{others > 1 ? 's' : ''} saved by another volunteer on this phone — they sync when that volunteer logs in here.</p>}
+        {counter !== 'gate' ? (
           <div className="grid-2" style={{ gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
             <div className="stat" style={{ ['--stat' as string]: 'var(--yellow)', padding: 12 }}><div className="label">{counter === 'lunch' ? 'Lunches today' : 'Stay scans today'}</div><div className="v" style={{ fontSize: 30 }}>{counts.inn}</div></div>
             <div className="stat" style={{ ['--stat' as string]: 'var(--blue)', padding: 12 }}><div className="label">By you</div><div className="v" style={{ fontSize: 30 }}>{counts.mine}</div></div>
@@ -372,13 +411,6 @@ function RoleCard({ card, live, startsOn, showName }: { card: Card; live: LiveSt
       )}
       {lunch && <div data-role="lunch" className="small">{lunch.ok ? `Lunch today ✓ (day ${lunch.x} of ${lunch.total})` : 'No lunch today ✕'}</div>}
       {card.stay !== undefined && <div data-role="stay" className="small">Stay: {card.stay ? 'yes' : 'no'}</div>}
-      {card.aid && (
-        <div data-role="aid" className="small stack g4">
-          <div>Blood group: <strong>{card.aid.blood === 'unknown' ? 'Not known' : card.aid.blood}</strong></div>
-          {card.aid.allergies && <div>Allergies: {card.aid.allergies}</div>}
-          <a className="btn sm green" href={`tel:${card.aid.phone}`}>📞 Emergency contact {card.aid.phone}</a>
-        </div>
-      )}
       {card.org && <div data-role="org" className="small">Holder phone: <a href={`tel:${card.org}`}>{card.org}</a></div>}
     </div>
   );

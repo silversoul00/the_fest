@@ -7,7 +7,7 @@ import { loadEnv } from './env.mjs';
 loadEnv();
 const { sealTicket, scannerKeys, verifyTf2, openPublic, liveSecret, liveCode } = await import('../src/lib/qr2.ts');
 const { importBundle, openTicket } = await import('../src/lib/qr2-client.ts');
-const { b64u, unb64u, splitTf2, liveStep, ROLES } = await import('../src/lib/qr2-format.ts');
+const { b64u, unb64u, splitTf2, liveStep, parseF, ROLES } = await import('../src/lib/qr2-format.ts');
 const { signTicket } = await import('../src/lib/ticket-crypto.ts');
 
 let fails = 0;
@@ -17,7 +17,7 @@ const festId = randomUUID(), otherFest = randomUUID(), ticketId = randomUUID();
 const worst = {
   ticketId, festId, epoch: 1, name: 'Abcdefghijklmnopqrstuvwxyz', type: 'Workshop Bundle Plus',
   startsOn: '2026-11-01', endsOn: '2026-11-16', lunchDays: ['2026-11-01', '2026-11-03', '2026-11-16'], stay: true,
-  aid: { blood: 'AB-', phone: '9876543210', allergies: 'Peanuts, penicillin, dust' }, holderPhone: '+91 98450 12345',
+  holderPhone: '+91 98450 12345',
 };
 const bundleFor = async (fid, roles, epoch = 1) => importBundle({
   festId: fid, startsOn: worst.startsOn, endsOn: worst.endsOn, epoch, expiresAt: new Date(Date.now() + 864e5).toISOString(),
@@ -25,30 +25,36 @@ const bundleFor = async (fid, roles, epoch = 1) => importBundle({
 });
 const withLive = async (url, step = liveStep(Date.now())) => `${url}.${b64u(new Uint8Array(liveCode(liveSecret(ticketId), step)))}`;
 
-// Size: all five sections + live code, 20-char name, 16-byte allergies, 16-day fest (2-byte lunch mask)
+// Size: every section (gate, lunch, stay, org) + live code, 20-char name, 16-day fest (2-byte lunch mask)
 const s1 = sealTicket('https://thefest.in', worst);
 const big = await withLive(s1.url);
 const ver = QRCode.create(big, { errorCorrectionLevel: 'M' }).version;
-check('worst case ≤ 300 chars and QR version ≤ 13 (thefest.in)', big.length <= 300 && ver <= 13, `${big.length} chars, v${ver}`);
+check('worst case ≤ 290 chars and QR version ≤ 13 (thefest.in)', big.length <= 290 && ver <= 13, `${big.length} chars, v${ver}`);
+check('sections are gate/lunch/stay/org (ids 1,2,3,5)', parseF(unb64u(splitTf2(s1.url).f)).sections.map((x) => x.role).join() === '1,2,3,5');
 const local = await withLive(sealTicket('http://localhost:3000', worst).url);
 check('worst case ≤ 13 on localhost too (e2e)', QRCode.create(local, { errorCorrectionLevel: 'M' }).version <= 13, `${local.length} chars`);
+// A long site address (40-char host, e.g. a Vercel preview URL) must still fit in version 13
+const host40 = 'https://' + 'thefest-git-full-app-harshith.vercel.app'.padEnd(40, 'x').slice(0, 40);
+const long = await withLive(sealTicket(host40, worst).url);
+const lv = QRCode.create(long, { errorCorrectionLevel: 'M' }).version;
+check('worst case ≤ 13 with a 40-char site host', lv <= 13, `${long.length} chars, v${lv}`);
 
 // Round trip with every key (organizer)
 const all = await bundleFor(festId, ROLES);
 const o = await openTicket(big, all);
 check('organizer opens all sections', o.kind === 'ok' && o.gate?.name === 'Abcdefghijklmnopqrst' && o.gate?.type === 'Workshop Bun'
-  && o.stay === true && o.lunch === 0b1000000000000101 && o.aid?.blood === 'AB-' && o.aid?.phone === '9876543210'
-  && o.aid?.allergies === 'Peanuts, penicil' && o.org === '9845012345' && o.live === 'live', JSON.stringify(o));
+  && o.stay === true && o.lunch === 0b1000000000000101 && o.org === '9845012345' && o.live === 'live' && !('aid' in o), JSON.stringify(o));
 const sv = verifyTf2(big);
 check('server verifies TF2 + live', sv.ok && sv.ticketId === ticketId && sv.live === 'live');
 
 // Role isolation
 const gateOnly = await openTicket(big, await bundleFor(festId, ['gate']));
-check('gate key opens only gate', gateOnly.kind === 'ok' && gateOnly.gate && gateOnly.lunch === undefined && !gateOnly.aid && !gateOnly.org);
+check('gate key opens only gate', gateOnly.kind === 'ok' && gateOnly.gate && gateOnly.lunch === undefined && !gateOnly.stay && !gateOnly.org);
 const lunchOnly = await openTicket(big, await bundleFor(festId, ['lunch']));
-check('lunch key opens only lunch (no live chip)', lunchOnly.kind === 'ok' && lunchOnly.lunch !== undefined && !lunchOnly.gate && !lunchOnly.aid && lunchOnly.live === null);
-const aidOnly = await openTicket(big, await bundleFor(festId, ['aid']));
-check('aid key opens only aid', aidOnly.kind === 'ok' && aidOnly.aid && !aidOnly.gate && !aidOnly.org);
+check('lunch key opens only lunch (no live chip)', lunchOnly.kind === 'ok' && lunchOnly.lunch !== undefined && !lunchOnly.gate && !lunchOnly.org && lunchOnly.live === null);
+const orgOnly = await openTicket(big, await bundleFor(festId, ['org']));
+check('org key opens only org', orgOnly.kind === 'ok' && orgOnly.org === '9845012345' && !orgOnly.gate && orgOnly.lunch === undefined);
+check('roles are gate/lunch/stay/org only', ROLES.join() === 'gate,lunch,stay,org');
 
 // Tamper every byte of P and F → rejected by scanner and server
 const parts = splitTf2(s1.url);

@@ -1,4 +1,5 @@
-# Smart QR (TF2): public page, sealed sections per scanner role (offline), live code, key epochs, first-aid card.
+# Smart QR (TF2): public page, sealed sections per scanner role (offline), live code, key epochs, offline sync.
+# First aid was dropped (Harshith, Oct 18 2026): no first-aid card, table or scanner role.
 # Run via tests/run-e2e.sh (server on :3000, seeded local database). Acceptance criteria numbers refer to
 # the Smart QR research brief (Oct 18, 2026).
 import asyncio, base64, os, re, subprocess, sys, uuid
@@ -16,7 +17,7 @@ def tf2(tid, *flags): return node('--conditions=react-server', 'scripts/sign-tic
 def b64u(b): return base64.urlsafe_b64encode(b).decode().rstrip('=')
 def flip(s, i): return s[:i] + ('B' if s[i] != 'B' else 'C') + s[i + 1:]
 MOBILE = dict(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
-SECRET_BITS = ['AB-', 'Blood', 'Peanuts', '7012983456', '9845012345']  # first-aid card + holder phone
+SECRET_BITS = ['9845012345']  # holder phone (organizer section only)
 
 FID = q("select id from fests where slug='neon-utsav'")
 def pick(type_name, n, extra=''):
@@ -25,12 +26,19 @@ def pick(type_name, n, extra=''):
              f"order by t.issued_at limit {n}").split('\n')
 MAIN = pick('3-Day Pass', 1)[0]
 MAIN_EMAIL = q(f"select u.email from tickets t join users u on u.id=t.user_id where t.id='{MAIN}'")
-DAY = pick('Day Pass', 9, f"and t.user_id <> (select user_id from tickets where id='{MAIN}')")
-T2, T3, T4, T5, T6, T7, T8, T9, TDAY = DAY
-AID_EMAIL = q(f"select email from users where email like 'attendee%' and email <> '{MAIN_EMAIL}' order by email desc limit 1")
+DAY = pick('Day Pass', 12, f"and t.user_id <> (select user_id from tickets where id='{MAIN}')")
+T2, T3, T4, T5, T6, T7, T8, T9, TDAY, T10, T11, T12 = DAY
+LT = pick('3-Day Pass', 1, f"and t.id <> '{MAIN}'")[0]  # lunch synced on a later day
+B_EMAIL = q(f"select email from users where email like 'attendee%' and email <> '{MAIN_EMAIL}' order by email desc limit 1")
 q(f"update users set phone='9845012345' where email='{MAIN_EMAIL}'")
 q(f"update tickets set holder_name='Abhishek Venkataraman Iyer' where id='{MAIN}'")
-q(f"insert into fest_staff (fest_id, email, name, duty, can_scan) values ('{FID}', '{AID_EMAIL}', 'Asha Aid', 'First aid', true) on conflict do nothing")
+# Duty "First aid" is no longer special: like any other duty name it scans at the gate.
+q(f"insert into fest_staff (fest_id, email, name, duty, can_scan) values ('{FID}', '{B_EMAIL}', 'Bharath B', 'First aid', true) on conflict do nothing")
+IDB_SHIFT_DAY = """new Promise((res, rej) => { const r = indexedDB.open('thefest-scan', 1); r.onerror = () => rej(r.error);
+  r.onsuccess = () => { const db = r.result, tx = db.transaction('queue', 'readwrite'), c = tx.objectStore('queue').openCursor(); let n = 0;
+    c.onsuccess = () => { const cur = c.result; if (cur) { const v = cur.value; v.at -= 86400000; cur.update(v); n++; cur.continue(); } };
+    tx.oncomplete = () => { db.close(); res(n); }; }; })"""
+async def waiting(pg): return await pg.inner_text('[data-offline-ready]')
 
 async def login(b, email, url='/login', ctx_opts=MOBILE):
     c = await b.new_context(**ctx_opts); pg = await c.new_page()
@@ -60,21 +68,13 @@ async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch()
 
-        # ── First-aid card on /me (AC15, AC17) ──
+        # ── First aid is gone (Harshith, Oct 18) ──
+        q("drop table if exists medical_profiles")
+        hc = await b.new_context(); hr = await hc.request.get(B + '/api/health')
+        check('FA schema check passes on a database without medical_profiles', hr.status == 200, hr.status)
         mc, me = await login(b, MAIN_EMAIL)
         await me.goto(B + '/me')
-        await me.select_option('select[name=blood_group]', 'AB-')
-        await me.fill('input[name=emergency_phone]', '70129 83456'); await me.fill('input[name=allergies]', 'Peanuts, penicil')
-        await me.click('button:has-text("Save first-aid card")')
-        await me.wait_for_selector('#first-aid .alert.error')
-        check('AC15 first-aid card needs both ticks (none)', 'Tick both boxes' in await me.inner_text('#first-aid .alert.error'))
-        await me.check('input[name=consent]'); await me.click('button:has-text("Save first-aid card")'); await asyncio.sleep(1.5)
-        check('AC15 first-aid card needs the 18+ tick', q(f"select count(*) from medical_profiles m join users u on u.id=m.user_id where u.email='{MAIN_EMAIL}'") == '0')
-        await me.check('input[name=adult]'); await me.click('button:has-text("Save first-aid card")')
-        await me.wait_for_selector('#first-aid .alert.ok')
-        row = q(f"select blood_group, allergies, emergency_phone from medical_profiles m join users u on u.id=m.user_id where u.email='{MAIN_EMAIL}'")
-        check('AC15 first-aid card saved with both ticks', row == 'AB-|Peanuts, penicil|7012983456', row)
-        check('AC17 first-aid form fits 390px', await no_hscroll(me))
+        check('FA /me has no first-aid card', await me.locator('#first-aid').count() == 0 and 'first-aid' not in (await body(me)).lower())
 
         # ── Ticket screen: live QR (AC1, AC13, AC17) ──
         await me.goto(f'{B}/tickets/{MAIN}'); await me.wait_for_selector('[data-countdown]')
@@ -100,8 +100,8 @@ async def main():
         raw = await pc.request.get(url.split('#')[0])
         html = await raw.text()
         code = q(f"select code from tickets where id='{MAIN}'")
-        leaks = [s for s in ['Venkataraman', MAIN_EMAIL, code, 'Lunch', 'Stay', 'Peanuts', '7012983456', '9845012345', 'AB-'] if s in html]
-        check('AC2 public page has no full name, email, phone, code, perks or medical data', not leaks, leaks)
+        leaks = [s for s in ['Venkataraman', MAIN_EMAIL, code, 'Lunch', 'Stay', '9845012345'] if s in html]
+        check('AC2 public page has no full name, email, phone, code or perks', not leaks, leaks)
         h = raw.headers
         check('AC2 public page: noindex, no-store, no-referrer', 'noindex' in h.get('x-robots-tag', '') and 'noindex' in html and 'no-store' in h.get('cache-control', '') and h.get('referrer-policy') == 'no-referrer', h)
         check('AC17 public page fits 390px', await no_hscroll(pub))
@@ -126,6 +126,10 @@ async def main():
         k = await gate.evaluate(keys_js(FID))
         roles = sorted({x['role'] for x in k['j'].get('keys', [])})
         check('AC9 keys: gate volunteer gets only gate keys, no-store', k['s'] == 200 and roles == ['gate'] and k['j']['roles'] == ['gate'] and 'no-store' in (k['cc'] or ''), (roles, k['cc']))
+        fac, fa = await scanner(b, B_EMAIL)
+        k = await fa.evaluate(keys_js(FID))
+        check('FA duty "First aid" now scans at the gate (gate keys only)', k['s'] == 200 and k['j']['roles'] == ['gate'] and await fa.locator('[data-counter=gate]').count() == 1, k['j'].get('roles'))
+        await fac.close()
         lc, lunch = await scanner(b, 'lunch@seed.thefest.in')
         hv = q("select id from fests where slug='hackverse'")
         k = await lunch.evaluate(keys_js(hv))
@@ -144,7 +148,7 @@ async def main():
         v = await scan(lunch, U_MAIN)
         t = await body(lunch)
         check('AC6 lunch offline: lunch today ✓, saved', 'Lunch' in v and 'saved' in v and 'Lunch today ✓' in await lunch.inner_text('[data-role=lunch]'), v)
-        check('AC6 lunch page shows no name/aid/phone', not [s for s in SECRET_BITS + ['Abhishek'] if s in t] and await lunch.locator('[data-role=gate],[data-role=aid],[data-role=org]').count() == 0)
+        check('AC6 lunch page shows no name/phone', not [s for s in SECRET_BITS + ['Abhishek'] if s in t] and await lunch.locator('[data-role=gate],[data-role=org]').count() == 0)
         v = await scan(lunch, U_MAIN)
         check('AC12 lunch offline twice → already taken (this phone)', 'this phone' in v, v)
         v = await scan(lunch, U_DAY)
@@ -155,43 +159,39 @@ async def main():
         n = q(f"select count(*) from perk_redemptions where ticket_id='{MAIN}' and slot like 'lunch:%'")
         check('AC12 synced: one lunch row, online re-scan says already taken', n == '1' and 'already' in v.lower(), (n, v))
 
+        # ── Lunch saved offline on an earlier day is not recorded today (should-fix 4) ──
+        await lc.set_offline(True)
+        v = await scan(lunch, tf2(LT))
+        shifted = await lunch.evaluate(IDB_SHIFT_DAY)   # pretend the scan happened yesterday
+        await lc.set_offline(False)
+        await lunch.wait_for_selector('.list :text("Not recorded: lunch from")', timeout=10000)
+        n = q(f"select count(*) from perk_redemptions where ticket_id='{LT}'")
+        v2 = await scan(lunch, tf2(LT))
+        check('SYNC yesterday\'s offline lunch is not recorded; today\'s lunch still works', 'saved' in v and shifted == 1 and n == '0' and v2.startswith('✓ Lunch'), (v, shifted, n, v2))
+
         # ── Stay volunteer offline (AC6) ──
         sc, stay = await scanner(b, 'stay@seed.thefest.in')
         await sc.set_offline(True)
         v = await scan(stay, U_MAIN); t = await body(stay)
         check('AC6 stay offline: stay yes, checked in, saved', 'checked in' in v and 'Stay: yes' in await stay.inner_text('[data-role=stay]'), v)
-        check('AC6 stay page shows no name/aid/phone', not [s for s in SECRET_BITS + ['Abhishek'] if s in t] and await stay.locator('[data-role=gate],[data-role=aid],[data-role=org],[data-role=lunch]').count() == 0)
+        check('AC6 stay page shows no name/phone', not [s for s in SECRET_BITS + ['Abhishek'] if s in t] and await stay.locator('[data-role=gate],[data-role=org],[data-role=lunch]').count() == 0)
         await sc.set_offline(False); await stay.wait_for_selector('.list :text("Synced")', timeout=10000)
         check('AC6 stay synced once', q(f"select count(*) from perk_redemptions where ticket_id='{MAIN}' and slot='stay_in'") == '1')
 
-        # ── First-aid volunteer offline (AC7, AC15) ──
-        ac, aid = await scanner(b, AID_EMAIL)
-        before = q(f"select (select count(*) from perk_redemptions where ticket_id='{MAIN}') || (select status from tickets where id='{MAIN}') || (select count(*) from scans where fest_id='{FID}')")
-        await ac.set_offline(True)
-        v = await scan(aid, U_MAIN)
-        a = await aid.inner_text('[data-role=aid]')
-        tel = await aid.get_attribute('[data-role=aid] a', 'href')
-        check('AC7 first aid offline: blood group, allergies, tap-to-call', 'AB-' in a and 'Peanuts, penicil' in a and tel == 'tel:7012983456', (a, tel))
-        check('AC7 first aid sees only the aid section', await aid.locator('[data-role=gate],[data-role=lunch],[data-role=stay],[data-role=org]').count() == 0)
-        await ac.set_offline(False); await asyncio.sleep(1)
-        j = await aid.evaluate(scan_js(U_MAIN, counter='aid'))
-        check('AC15 first-aid desk API answer has no medical data', 'Valid ticket' in j and not [s for s in SECRET_BITS if s in j], j[:120])
-        after = q(f"select (select count(*) from perk_redemptions where ticket_id='{MAIN}') || (select status from tickets where id='{MAIN}') || (select count(*) from scans where fest_id='{FID}')")
-        check('AC7 first aid redeems nothing', before == after, (before, after))
-
         # ── Organizer + co-organizer see everything (AC8, AC17) ──
-        oc, org = await scanner(b, 'organizer@thefest.in', '&counter=aid')
+        oc, org = await scanner(b, 'organizer@thefest.in', '&counter=lunch')
         await oc.set_offline(True)
         await scan(org, U_MAIN)
         roles_seen = [r for r in ['gate', 'lunch', 'stay', 'aid', 'org'] if await org.locator(f'[data-role={r}]').count()]
-        check('AC8 organizer sees all sections incl. holder phone', roles_seen == ['gate', 'lunch', 'stay', 'aid', 'org'] and '9845012345' in await org.inner_text('[data-role=org]'), roles_seen)
+        check('AC8 organizer sees all sections incl. holder phone (no aid)', roles_seen == ['gate', 'lunch', 'stay', 'org'] and '9845012345' in await org.inner_text('[data-role=org]'), roles_seen)
         check('AC17 scanner role card fits 390px', await no_hscroll(org))
         await org.screenshot(path=S + 'smartqr_org_card.png', full_page=True)
         await oc.set_offline(False)
         q(f"insert into fest_members (fest_id, email) values ('{FID}', 'organizer2@thefest.in') on conflict do nothing")
-        cc, co = await scanner(b, 'organizer2@thefest.in', '&counter=aid')
+        cc, co = await scanner(b, 'organizer2@thefest.in', '&counter=lunch')
         await cc.set_offline(True); await scan(co, U_MAIN)
-        check('AC8 co-organizer sees all sections incl. holder phone', await co.locator('[data-role=org]').count() == 1 and await co.locator('[data-role=aid]').count() == 1)
+        check('AC8 co-organizer sees all sections incl. holder phone', await co.locator('[data-role=org]').count() == 1 and await co.locator('[data-role=gate]').count() == 1)
+        check('FA counter picker has no first aid', 'first aid' not in (await co.inner_text('select[aria-label=Counter]')).lower())
         await cc.set_offline(False); await cc.close()
         q(f"delete from fest_members where fest_id='{FID}' and email='organizer2@thefest.in'")
 
@@ -202,7 +202,7 @@ async def main():
         g = await gate.inner_text('[data-role=gate]')
         check('AC11 gate offline → amber "saved"', 'saved' in v and await gate.locator('.verdict.offline').count() == 1, v)
         check('AC6 gate offline sees full name (20 chars) + type', 'Abhishek Venkatarama' in g and '3-Day Pass' in g, g)
-        check('AC6 gate page shows no aid/phone', not [s for s in SECRET_BITS if s in t] and await gate.locator('[data-role=aid],[data-role=org],[data-role=lunch]').count() == 0)
+        check('AC6 gate page shows no phone', not [s for s in SECRET_BITS if s in t] and await gate.locator('[data-role=org],[data-role=lunch]').count() == 0)
         v = await scan(gate, U_MAIN)
         check('AC11 same ticket again on this phone → Already in (this phone)', 'Already in (this phone)' in v, v)
         parts = U_MAIN.split('/t/')[1]; pp, ff = parts.split('#')
@@ -224,6 +224,59 @@ async def main():
         v1 = await scan(gate, U_MAIN.replace(pp, flip(pp, 5)))
         check('AC4 tampered online → Fake or tampered', 'Fake or tampered' in v1, v1)
 
+        # ── Sync keeps the queue unless our server clearly answers (must-fix 2) ──
+        await gc.set_offline(True)
+        v1 = await scan(gate, tf2(T10)); v2 = await scan(gate, tf2(T11))
+        check('SYNC two offline gate scans queued', 'saved' in v1 and 'saved' in v2 and '2 scans waiting' in await waiting(gate), (v1, v2))
+        portal = lambda route: route.fulfill(status=200, content_type='text/html', body='<html>Log in to campus Wi-Fi</html>')
+        await gate.route('**/api/scan', portal)
+        await gc.set_offline(False); await asyncio.sleep(3)
+        st = q(f"select string_agg(status::text, ',') from tickets where id in ('{T10}', '{T11}')")
+        check('SYNC Wi-Fi login page (HTML 200) keeps both queued', '2 scans waiting' in await waiting(gate) and st == 'valid,valid', (await waiting(gate), st))
+        await gate.unroute('**/api/scan', portal)
+        down = lambda route: route.fulfill(status=503, content_type='application/json', body='{"error":"Service unavailable"}')
+        await gate.route('**/api/scan', down)
+        await gate.click('[data-sync-now]'); await asyncio.sleep(2)
+        check('SYNC server 503 keeps both queued', '2 scans waiting' in await waiting(gate) and q(f"select count(*) from scans where ticket_id in ('{T10}', '{T11}')") == '0', await waiting(gate))
+        await gate.unroute('**/api/scan', down)
+        # no "online" event now — only the retry timer (every 30 s) can send them
+        try:
+            await gate.wait_for_function("!document.querySelector('[data-offline-ready]').textContent.includes('waiting')", timeout=45000)
+        except Exception: pass
+        st = q(f"select string_agg(status::text, ',' order by status) from tickets where id in ('{T10}', '{T11}')")
+        adm = q(f"select count(*) from scans where ticket_id in ('{T10}', '{T11}') and result='admitted'")
+        check('SYNC retry timer sends both once the server is back; both used, admitted once each', st == 'used,used' and adm == '2', (st, adm))
+
+        # ── Lock with a queue: scans stay with the volunteer who made them (should-fix 5) ──
+        A_ID = q("select id from users where email='volunteer@thefest.in'")
+        await gc.set_offline(True)
+        v = await scan(gate, tf2(T12))
+        await gate.route('**/api/scan', down); await gc.set_offline(False)
+        msgs = []
+        async def on_dialog(d):
+            msgs.append(d.message); await d.accept()
+        gate.on('dialog', on_dialog)
+        await gate.click('button:has-text("Lock")'); await gate.wait_for_url('**/scan/login', timeout=10000)
+        check('SYNC Lock with an unsynced scan warns first', 'saved' in v and msgs and '1 scan not synced' in msgs[0], msgs)
+        await gate.unroute('**/api/scan', down)
+        await gate.fill('input[name=email]', B_EMAIL); await gate.fill('input[name=password]', 'password123')
+        await gate.click('button[type=submit]'); await gate.wait_for_url(lambda u: '/scan/login' not in u, timeout=15000)
+        await gate.goto(f'{B}/scan?fest={FID}'); await gate.wait_for_selector('[data-offline-ready]', timeout=15000)
+        await asyncio.sleep(3)
+        oth = await gate.locator('[data-others-queued]').count()
+        n = q(f"select count(*) from scans where ticket_id='{T12}'")
+        check('SYNC next volunteer on the phone does not send it (shown as another volunteer\'s)', oth == 1 and n == '0' and q(f"select status from tickets where id='{T12}'") == 'valid', (oth, n))
+        await gate.goto(B + '/scan/login')
+        await gate.fill('input[name=email]', 'volunteer@thefest.in'); await gate.fill('input[name=password]', 'password123')
+        await gate.click('button[type=submit]'); await gate.wait_for_url(lambda u: '/scan/login' not in u, timeout=15000)
+        await gate.goto(f'{B}/scan?fest={FID}'); await gate.wait_for_selector('[data-offline-ready]', timeout=15000)
+        by = ''
+        for _ in range(30):  # it may already have synced on the page the login redirected to
+            by = q(f"select scanned_by from scans where ticket_id='{T12}' and result='admitted'")
+            if by: break
+            await asyncio.sleep(1)
+        check('SYNC same volunteer logs in again → it syncs under their name', by == A_ID, by)
+
         # ── TF1 + backup codes online (AC10), live chips online (AC13) ──
         tf1b = node('scripts/sign-ticket.mjs', T8, FID)
         j1 = await gate.evaluate(scan_js(tf1b, 'Gate 1')); j2 = await gate.evaluate(scan_js(tf1b, 'Gate 1'))
@@ -241,27 +294,17 @@ async def main():
         # ── Worst-case QR through the fake camera (AC5) ──
         worst = tf2(MAIN, '--live')
         ver = node('-e', "console.log(require('qrcode').create(process.argv[1], {errorCorrectionLevel:'M'}).version)", worst)
-        check('AC5 worst case (all sections + live, 20-char name, 16-byte allergies) ≤ 300 chars, ≤ v13', len(worst) <= 300 and int(ver) <= 13, (len(worst), ver))
+        check('AC5 worst case (all sections + live, 20-char name) ≤ 290 chars, ≤ v13', len(worst) <= 290 and int(ver) <= 13, (len(worst), ver))
         node('-e', "require('qrcode').toFile(process.argv[1], process.argv[2], {width:600, margin:4}, e => process.exit(e ? 1 : 0))", S + 'qr2.png', worst)
         subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-loop', '1', '-i', S + 'qr2.png', '-vf', 'scale=640:640,format=yuv420p', '-t', '6', '-r', '15', S + 'qr2.y4m'], check=True)
         cam = await p.chromium.launch(args=['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', f'--use-file-for-fake-video-capture={S}qr2.y4m'])
-        camc, camp = await scanner(cam, 'organizer@thefest.in', '&counter=aid')
+        camc, camp = await scanner(cam, 'organizer@thefest.in', '&counter=lunch')
         await camp.click('button:has-text("Start camera")')
-        await camp.wait_for_selector('.verdict [data-role=aid]', timeout=20000)
-        check('AC5 worst-case QR scans in the fake camera', 'AB-' in await camp.inner_text('[data-role=aid]'))
+        await camp.wait_for_selector('.verdict [data-role=org]', timeout=20000)
+        check('AC5 worst-case QR scans in the fake camera', '9845012345' in await camp.inner_text('[data-role=org]'))
         await cam.close()
 
-        # ── Delete first-aid card; no medical data elsewhere (AC15) ──
         ec, eo = await login(b, 'organizer@thefest.in')
-        csv = await (await ec.request.get(f'{B}/organizer/{FID}/export')).text()
-        ana = await (await ec.request.get(f'{B}/organizer/{FID}/analytics')).text()
-        errs = q("select count(*) from app_errors where message ilike '%peanut%' or message like '%7012983456%' or path like '%#%'")
-        check('AC15 no medical data in CSV export, analytics or error log', not [s for s in ['Peanuts', '7012983456'] if s in csv + ana] and errs == '0', (len(csv), errs))
-        await me.goto(B + '/me'); await me.click('button:has-text("Delete my first-aid card")'); await asyncio.sleep(1.5)
-        check('AC15 delete removes the row', q(f"select count(*) from medical_profiles m join users u on u.id=m.user_id where u.email='{MAIN_EMAIL}'") == '0')
-        await oc.set_offline(True); await scan(org, tf2(MAIN))
-        check('AC15 next QR has no aid section', await org.locator('[data-role=gate]').count() == 1 and await org.locator('[data-role=aid]').count() == 0)
-        await oc.set_offline(False)
 
         # ── Saved ticket on /offline (AC16) ──
         await me.goto(f'{B}/tickets/{MAIN}')
