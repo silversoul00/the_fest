@@ -294,9 +294,19 @@ export async function removeSponsor(fd: FormData) {
   if (!isUuid(id)) redirect(`/organizer/${fest.id}/sponsors`);
   // Students who shared with this brand must keep their "Stop sharing" button, and the brand must keep seeing
   // withdrawals — so a sponsor with any leads (active or withdrawn) can't be deleted.
-  const [lead] = (await leadsReady()) ? await sql`select 1 from sponsor_leads where sponsor_id = ${id} limit 1` : [];
-  if (lead) redirect(`/organizer/${fest.id}/sponsors?err=leads`);
-  await sql`delete from sponsors where id = ${id} and fest_id = ${fest.id}`;
+  if (await leadsReady()) {
+    // One statement, so a lead saved between a check and the delete can't be swept away with the sponsor
+    const gone = await sql`
+      delete from sponsors sp where sp.id = ${id} and sp.fest_id = ${fest.id}
+        and not exists (select 1 from sponsor_leads l where l.sponsor_id = sp.id)
+      returning sp.id`;
+    if (!gone.length) {
+      const [lead] = await sql`select 1 from sponsor_leads where sponsor_id = ${id} limit 1`;
+      if (lead) redirect(`/organizer/${fest.id}/sponsors?err=leads`);
+    }
+  } else {
+    await sql`delete from sponsors where id = ${id} and fest_id = ${fest.id}`;
+  }
   refresh(fest.id);
   redirect(`/organizer/${fest.id}/sponsors?removed=1`);
 }

@@ -5,5 +5,5 @@
 - `docs/team/BRIEF.md` holds Harshith's instructions and decisions. Read it first; add new ones to it.
 - Never merge to `main`. Push to `full-app` only for meaningful, tested batches — not for every small change.
 - Never change Harshith's Supabase, Vercel, Cashfree or Razorpay accounts without his say-so in this conversation.
-- Production database: Supabase project `thefest` (id `uxhpvbgxftsdpcyycxpq`, Mumbai). Tables match `db/schema.sql` including v2.2 ops tables, v2.3 counters (applied Oct 17), v2.4 Smart QR qr_epoch (applied Oct 18, both databases) and v2.5 sponsor_leads (approved Oct 18 for both databases; apply after tests pass). Preview/demo database: `thefest-preview` (id `utcobvnsayyoeyqcmvgl`), loaded with db/demo-seed.sql.
+- Production database: Supabase project `thefest` (id `uxhpvbgxftsdpcyycxpq`, Mumbai). Tables match `db/schema.sql` including v2.2 ops tables, v2.3 counters (applied Oct 17), v2.4 Smart QR qr_epoch (applied Oct 18, both databases) and v2.5 sponsor_leads (applied Oct 18, both databases). Preview/demo database: `thefest-preview` (id `utcobvnsayyoeyqcmvgl`), loaded with db/demo-seed.sql.
 - Release check: `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers bash tests/run-e2e.sh` (local Postgres only).
