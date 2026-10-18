@@ -79,6 +79,11 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 - Next build, his pick: **sponsor lead capture + sponsor ROI report**. Later candidates (not yet chosen): quick fest
   setup / copy last year's fest, Kannada/Hindi scanner, live crowd view, WhatsApp (built switched off), deploy pack.
 
+## Sponsorship requests (Oct 18, 2026)
+- Harshith: "make it so that they (org) can send sponsorship request [and] the sponsors request for the sponsorships."
+  Two-way: organizers send sponsorship requests/pitches to brands; brands request to sponsor fests. (This is the start of
+  the marketplace in his revenue plan.)
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.
