@@ -91,6 +91,15 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 - Harshith: "from here on out it's just planning … don't start to build anything until I say so — just pure planning,
   because I have no credit left for usage." No building, no agent runs, no pushes until he explicitly says to build.
 
+## Organizer plan (Oct 18–20, 2026) — PLANNED, not built
+- Harshith: work one role at a time, Organizer first. Kannada/Hindi for volunteers: **no**.
+- Team & Roles (approved plan, Oct 20): organizers assign roles to students — Co-organizer, Event head (one competition),
+  Judge, Finance lead, Sponsorship lead, Media/PR, Volunteer (Gate/Lunch/Stay), Desk volunteer. Fixed roles in v1 (no
+  custom roles); owner and co-organizers can assign, only the owner adds co-organizers; one student may hold several
+  roles; optional limit to one event/day; activity log; pending until email confirmed. Comes before Competitions.
+- Organizer "Must" list (proposed): Competitions, Digital certificates, Quick setup / copy last year, Volunteer shifts.
+  Should: committee budget, vendor marketplace (certificate makers, medal makers, canopy etc.), feedback/polls, crowd view.
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.
