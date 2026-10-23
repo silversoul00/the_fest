@@ -1,4 +1,5 @@
 import 'server-only';
+import { clip } from './format';
 import { createHmac } from 'node:crypto';
 import { safeEq } from './payments';
 import { cashfreeEnvSetting } from './env';
@@ -51,7 +52,7 @@ export async function createCashfreeOrder(o: {
         customer_id: o.customer.id.replace(/-/g, '').slice(0, 50),
         customer_phone: o.customer.phone,
         customer_email: o.customer.email,
-        customer_name: o.customer.name.slice(0, 100),
+        customer_name: clip(o.customer.name, 100),
       },
       order_meta: { return_url: o.returnUrl, notify_url: o.notifyUrl },
       order_note: (o.note ?? 'THE FEST tickets').slice(0, 200),

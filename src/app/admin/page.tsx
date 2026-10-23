@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { sql } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth';
 import { festMoney } from '@/lib/admin-queries';
-import { dateRange, num, rupees } from '@/lib/format';
+import { dateRange, num, rupees, cutText } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty, Stat } from '@/components/ui';
 import { approveFest, sendBackFest, unlockLoginAction } from './actions';
@@ -52,8 +52,8 @@ export default async function AdminHome() {
   await requireAdmin();
   const [money, review, [counts], flagged] = await Promise.all([
     festMoney(),
-    sql<{ id: string; name: string; slug: string; college: string; city: string; starts_on: string; ends_on: string; organizer: string; email: string; phone: string | null; types: number; min_price: number | null; created_at: Date; description: string }[]>`
-      select f.id, f.name, f.slug, f.college, f.city, f.starts_on, f.ends_on, u.name as organizer, u.email::text as email, u.phone, f.created_at, f.description,
+    sql<{ id: string; name: string; slug: string; college: string; city: string; starts_on: string; ends_on: string; organizer: string; email: string; phone: string | null; types: number; min_price: number | null; created_at: Date; description: string; review_note: string | null }[]>`
+      select f.id, f.name, f.slug, f.college, f.city, f.starts_on, f.ends_on, u.name as organizer, u.email::text as email, u.phone, f.created_at, f.description, f.review_note,
         (select count(*) from ticket_types t where t.fest_id = f.id and t.active)::int as types,
         (select min(price_paise) from ticket_types t where t.fest_id = f.id and t.active)::int as min_price
       from fests f join users u on u.id = f.organizer_id where f.status = 'review' order by f.created_at`,
@@ -103,7 +103,8 @@ export default async function AdminHome() {
             </div>
             <Link className="btn sm outline" href={`/fests/${f.slug}`} target="_blank">Preview ↗</Link>
           </div>
-          {f.description && <p className="small soft" style={{ whiteSpace: 'pre-line' }}>{f.description.slice(0, 400)}</p>}
+          {f.review_note && <p className="small c-orange">{f.review_note}</p>}
+          {f.description && <p className="small soft" style={{ whiteSpace: 'pre-line' }}>{cutText(f.description, 400)}</p>}
           <p className="xs muted">Check before approving: the college and dates are real (search the fest name, check the college’s Instagram), the organizer can be reached, prices look normal.</p>
           <div className="row g12 wrap-row" style={{ alignItems: 'flex-start' }}>
             <form action={approveFest}><input type="hidden" name="festId" value={f.id} /><button className="btn green">Approve — go live</button></form>

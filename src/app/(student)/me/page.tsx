@@ -31,9 +31,9 @@ export default async function Me({ searchParams }: { searchParams: Promise<{ sto
     <div className="wrap stack g16" style={{ maxWidth: 560 }}>
       <div className="row g16 mt8">
         <div className="avatar" style={{ width: 64, height: 64, fontSize: 28 }}>{initials(user.name)}</div>
-        <div className="grow">
+        <div className="grow wrap-anywhere">
           <div className="display" style={{ fontSize: 32 }}>{user.name}</div>
-          <div className="small muted">{user.college ?? 'Student'} · {user.email}</div>
+          <div className="small muted wrap-anywhere">{user.college ?? 'Student'} · {user.email}</div>
         </div>
       </div>
 

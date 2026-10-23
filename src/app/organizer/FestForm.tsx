@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActionForm, Submit } from '@/components/forms';
 import type { ActionState, Fest } from '@/lib/types';
 
@@ -8,20 +8,39 @@ import type { FestFormFields } from '@/lib/fest-form';
 const EMOJIS = ['🎉', '🎆', '🎵', '🎨', '🚀', '💡', '⚽', '📈', '🎭', '🎤', '🌿', '🔥'];
 const ACCENTS = ['#FFE034', '#FF5C1A', '#00E5A0', '#38BDF8', '#FF2D55', '#B794F6'];
 
-export function FestForm({ action, fest, create }: {
+export function FestForm({ action, fest, create, holders = 0, live = false }: {
   action: (s: ActionState, fd: FormData) => Promise<ActionState>;
   /** Only the editable fields — never pass a whole fest row to this client component (it would ship every column to the browser). */
   fest?: FestFormFields;
   create?: boolean;
+  /** People holding a ticket — they are emailed when the name, dates or venue change. */
+  holders?: number;
+  /** Fest is live: renaming it (with tickets sold) sends it back to THE FEST for review. */
+  live?: boolean;
 }) {
   const [emoji, setEmoji] = useState(fest?.emoji ?? '🎉');
   const [accent, setAccent] = useState(fest?.accent ?? '#FFE034');
+  const [changed, setChanged] = useState<{ name: boolean; other: boolean }>({ name: false, other: false });
+  const watch = (e: React.FormEvent<HTMLDivElement>) => {
+    if (!fest || !holders) return;
+    const form = (e.target as HTMLInputElement).form;
+    if (!form) return;
+    const v = (k: string) => String(new FormData(form).get(k) ?? '').trim();
+    setChanged({
+      name: v('name') !== fest.name,
+      other: v('starts_on') !== fest.starts_on || v('ends_on') !== fest.ends_on || v('venue') !== (fest.venue ?? ''),
+    });
+  };
+  // After a save the page refreshes with the new values: nothing is "changed" any more
+  useEffect(() => setChanged({ name: false, other: false }), [fest?.name, fest?.starts_on, fest?.ends_on, fest?.venue]);
+  const notice = !!fest && holders > 0 && (changed.name || changed.other);
 
   return (
     <ActionForm action={action}>
       {fest && <input type="hidden" name="festId" value={fest.id} />}
       <input type="hidden" name="emoji" value={emoji} />
       <input type="hidden" name="accent" value={accent} />
+      <div className="stack g16" onChange={watch} onInput={watch}>
 
       <label className="field"><span>Fest name</span>
         <input className="input" name="name" required maxLength={60} defaultValue={fest?.name} placeholder="e.g. Neon Utsav 2026" />
@@ -52,6 +71,7 @@ export function FestForm({ action, fest, create }: {
         <label className="field"><span>Ends</span>
           <input className="input" type="date" name="ends_on" required defaultValue={fest?.ends_on} />
         </label>
+      </div>
       </div>
       <label className="field"><span>Description</span>
         <textarea className="textarea" name="description" maxLength={2000} defaultValue={fest?.description} placeholder="What makes your fest worth going to? Pro shows, competitions, prizes…" />
@@ -92,6 +112,15 @@ export function FestForm({ action, fest, create }: {
         </div>
       )}
 
+      {notice && (
+        <div className="alert info stack g8" role="status" data-testid="change-notice">
+          <span>
+            {changed.name && live ? 'This sends the fest back to admin review (ticket sales pause until THE FEST approves it) and emails ' : 'This emails '}
+            {holders} ticket holder{holders === 1 ? '' : 's'} what changed.
+          </span>
+          <label className="check"><input type="checkbox" name="confirm_notice" /> I understand</label>
+        </div>
+      )}
       <Submit pendingText={create ? 'Creating…' : 'Saving…'}>{create ? 'Create fest →' : 'Save changes'}</Submit>
     </ActionForm>
   );

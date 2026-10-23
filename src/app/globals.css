@@ -50,6 +50,8 @@ img, svg { display: block; max-width: 100%; }
 
 /* ── Typography ─────────────────────────────────── */
 .display { font-family: var(--f-display); letter-spacing: 0.04em; line-height: 0.92; font-weight: 400; }
+/* Long names with no spaces (or in any script) wrap instead of pushing the page sideways */
+.display, .h1, .h2, .h3, .wrap-anywhere { overflow-wrap: anywhere; min-width: 0; }
 .h1 { font-family: var(--f-display); font-size: clamp(44px, 11vw, 84px); letter-spacing: 0.03em; line-height: 0.9; font-weight: 400; }
 .h2 { font-family: var(--f-display); font-size: clamp(30px, 7vw, 44px); letter-spacing: 0.04em; line-height: 0.95; font-weight: 400; }
 .h3 { font-family: var(--f-display); font-size: 22px; letter-spacing: 0.06em; line-height: 1; font-weight: 400; }

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { sql } from '@/lib/db';
 import { openPublic } from '@/lib/qr2';
-import { dateRange } from '@/lib/format';
+import { dateRange, clip } from '@/lib/format';
 
 /*
  * What any phone camera sees when it scans a THE FEST ticket: the basics only.
@@ -24,7 +24,7 @@ export default async function PublicTicket({ params }: { params: Promise<{ p: st
     from tickets t join ticket_types tt on tt.id = t.ticket_type_id join fests f on f.id = t.fest_id where t.id = ${open.ticketId}`;
   if (!t) notFound();
   const [label, color] = BADGE[t.status] ?? BADGE.void;
-  const first = (t.holder_name.trim().split(/\s+/)[0] ?? '').slice(0, 20);
+  const first = clip(t.holder_name.trim().split(/\s+/)[0] ?? '', 20);
 
   return (
     <main className="auth-shell">

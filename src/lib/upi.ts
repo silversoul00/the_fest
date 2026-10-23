@@ -111,6 +111,7 @@ export async function matchCredits(
 /** Student submits the UTR from their UPI app. Confirms instantly if the bank credit is already known. */
 export async function submitUtr(orderId: string, userId: string, utrRaw: string): Promise<{ status: 'confirmed' | 'waiting' }> {
   const utr = utrRaw.replace(/\D/g, '');
+  if (/^(\d)\1{11}$/.test(utr)) throw new OrderError('That isn’t a real UTR — copy the 12-digit reference from your UPI app’s payment details.');
   if (!UTR_RE.test(utr)) throw new OrderError('The UPI reference number (UTR) is 12 digits — check your UPI app’s payment details.');
   const [o] = await sql<{ id: string; fest_id: string; amount_paise: number; status: string; utr: string | null }[]>`
     select id, fest_id, amount_paise, status, utr from orders

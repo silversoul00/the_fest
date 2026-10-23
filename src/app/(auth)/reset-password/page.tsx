@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { createHash } from 'node:crypto';
+import { sql } from '@/lib/db';
 import { ActionForm, Submit } from '@/components/forms';
 import { resetPassword } from '../reset-actions';
 
@@ -6,6 +8,10 @@ export const metadata = { title: 'Set a new password' };
 
 export default async function ResetPassword({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const { token = '' } = await searchParams;
+  // Check the link before showing the form, so nobody types a new password into a dead link (it is still checked again on save)
+  const usable = !!token && /^[A-Za-z0-9_-]{20,100}$/.test(token) && (await sql`
+    select 1 from password_resets where token_hash = ${createHash('sha256').update(token).digest('hex')}
+      and used_at is null and expires_at > now()`).length > 0;
   return (
     <main className="auth-shell">
       <span className="ghost-word" aria-hidden>FEST</span>
@@ -14,6 +20,8 @@ export default async function ResetPassword({ searchParams }: { searchParams: Pr
         <h1 className="h1">New<br />password.</h1>
         {!token ? (
           <div className="alert error">This link is missing its code. <Link className="accent" href="/forgot-password">Ask for a new one</Link>.</div>
+        ) : !usable ? (
+          <div className="alert error" role="alert">This reset link has expired or was already used. <Link className="accent" href="/forgot-password">Ask for a new one</Link>.</div>
         ) : (
           <ActionForm action={resetPassword}>
             <input type="hidden" name="token" value={token} />

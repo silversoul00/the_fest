@@ -58,11 +58,99 @@ export function ago(d: Date | string): string {
 }
 
 export function initials(name: string): string {
-  return name.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+  return name.split(/\s+/).filter(Boolean).map((w) => graphemes(w)[0]).slice(0, 2).join('').toUpperCase() || '?';
+}
+
+// Indian scripts (Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam) share one
+// layout inside their 128-character Unicode blocks, so one table (by offset in the block) transliterates them all.
+const VOWELS: Record<number, string> = {
+  0x05: 'a', 0x06: 'a', 0x07: 'i', 0x08: 'i', 0x09: 'u', 0x0a: 'u', 0x0b: 'ri', 0x0c: 'li', 0x0d: 'e', 0x0e: 'e', 0x0f: 'e',
+  0x10: 'ai', 0x11: 'o', 0x12: 'o', 0x13: 'o', 0x14: 'au', 0x60: 'ri', 0x61: 'li',
+};
+const CONS = ('k kh g gh ng ch chh j jh ny t th d dh n t th d dh n n p ph b bh m y r r l l l v sh sh s h').split(' ');
+const EXTRA: Record<number, string> = { 0x58: 'q', 0x59: 'kh', 0x5a: 'g', 0x5b: 'z', 0x5c: 'd', 0x5d: 'rh', 0x5e: 'f', 0x5f: 'y' };
+const MATRAS: Record<number, string> = {
+  0x3e: 'a', 0x3f: 'i', 0x40: 'i', 0x41: 'u', 0x42: 'u', 0x43: 'ri', 0x44: 'ri', 0x45: 'e', 0x46: 'e', 0x47: 'e',
+  0x48: 'ai', 0x49: 'o', 0x4a: 'o', 0x4b: 'o', 0x4c: 'au', 0x62: 'li', 0x63: 'li',
+};
+
+/** "ನಮ್ಮ ಉತ್ಸವ" → "namma utsava", "नमस्ते" → "namaste", "Café" → "Cafe". Other scripts pass through. */
+export function transliterate(s: string): string {
+  let out = '';
+  let inherent = false; // the last letter was a consonant whose built-in "a" may still be replaced
+  for (const ch of s.normalize('NFC').replace(/[\u200c\u200d]/g, '')) {
+    const cp = ch.codePointAt(0)!;
+    if (cp < 0x0900 || cp > 0x0d7f) { out += ch; inherent = false; continue; }
+    const o = cp & 0x7f;
+    if (o >= 0x15 && o <= 0x39) { out += CONS[o - 0x15] + 'a'; inherent = true; }
+    else if (EXTRA[o] && cp < 0x0980) { out += EXTRA[o] + 'a'; inherent = true; }
+    else if (VOWELS[o]) { out += VOWELS[o]; inherent = false; }
+    else if (MATRAS[o] || o === 0x4d) { if (inherent) out = out.slice(0, -1); out += MATRAS[o] ?? ''; inherent = false; }
+    else if (o === 0x01 || o === 0x02) { out += 'n'; inherent = false; }
+    else if (o === 0x03) { out += 'h'; inherent = false; }
+    else if (o >= 0x66 && o <= 0x6f) { out += String(o - 0x66); inherent = false; }
+    else if (o === 0x3c || o === 0x00 || (o >= 0x51 && o <= 0x57)) { /* nukta, accents, length marks: no sound of their own */ }
+    else { out += ' '; inherent = false; }
+  }
+  return out.normalize('NFKD').replace(/[̀-ͯ]/g, '');
 }
 
 export function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+  return transliterate(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
+}
+
+/**
+ * Slug for a new fest. Names in any Indian script are transliterated; if that still gives nothing useful
+ * (emoji, Chinese, just "Fest"), college + city + year are used so links stay readable and different.
+ */
+export function festSlug(f: { slug?: string; name: string; college: string; city: string; starts_on: string }): string {
+  const year = f.starts_on.slice(0, 4);
+  let slug = slugify(f.slug || f.name);
+  const generic = (x: string) => x.replace(/-?(fest|festival|utsav|utsava|\d+)-?/g, '').length < 3;
+  if (generic(slug)) slug = slugify([f.name, f.college, f.city].map((x) => slugify(x)).filter(Boolean).join(' '));
+  if (generic(slug)) slug = `${slug ? slug + '-' : ''}fest-${year}-${Math.random().toString(36).slice(2, 6)}`;
+  return slug;
+}
+
+/** Split into whole letters (user-perceived characters), e.g. "ಕ್ಕ" or "👍🏽" stay one piece. */
+export function graphemes(s: string): string[] {
+  const Seg = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string }> } }).Segmenter;
+  return Seg ? [...new Seg(undefined, { granularity: 'grapheme' }).segment(s)].map((x) => x.segment) : Array.from(s);
+}
+
+/** Shorten to at most `max` characters (UTF-16 units, like String.slice) without splitting a letter. No "…". */
+export function clip(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let out = '';
+  for (const g of graphemes(s)) { if (out.length + g.length > max) break; out += g; }
+  return out;
+}
+
+/** Cut text to at most `max` whole letters (a Kannada/Hindi letter with its vowel sign, or an emoji, counts as one). */
+export function cutText(s: string, max: number): string {
+  const parts = graphemes(s);
+  return parts.length <= max ? s : parts.slice(0, max).join('').trimEnd() + '…';
+}
+
+/**
+ * A redirect target typed or linked by a user ("?next=") is only followed when it is a path on this site:
+ * starts with one "/", no "//" or backslash (browsers treat "/\\evil.com" as "//evil.com"), no control characters
+ * or schemes — also after URL-decoding. Anything else gives '' (the caller then uses the portal).
+ */
+export function safeNext(n: unknown): string {
+  if (typeof n !== 'string' || n.length > 500) return '';
+  let d = n;
+  for (let i = 0; i < 3; i++) {
+    let x: string;
+    try { x = decodeURIComponent(d); } catch { return ''; }
+    if (x === d) break;
+    d = x;
+  }
+  for (const v of [n, d]) {
+    if (!v.startsWith('/') || v.startsWith('//') || v.includes('\\') || /[\u0000-\u001f\u007f\s]/.test(v)) return '';
+  }
+  try { if (new URL(n, 'https://thefest.invalid').origin !== 'https://thefest.invalid') return ''; } catch { return ''; }
+  return n;
 }
 
 /** Today's date in India as 'YYYY-MM-DD' (fests run on IST, servers run on UTC). */

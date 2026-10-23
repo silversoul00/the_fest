@@ -13,13 +13,13 @@ export async function transferAction(_: ActionState, fd: FormData): Promise<Acti
   if (!isUuid(id)) return { error: 'Ticket not found.' };
   if (!/^\S+@\S+\.\S+$/.test(email)) return { error: 'Enter your friend’s email.' };
   if (String(fd.get('confirm') ?? '') !== 'on') return { error: 'Tick the box to confirm — your QR stops working after this.' };
-  let to: string;
   try {
-    to = (await transferTicket(id, user.id, email)).to.name;
+    await transferTicket(id, user.id, email);
   } catch (e) {
     if (e instanceof TransferError) return { error: e.message };
     throw e;
   }
   revalidatePath('/tickets');
-  redirect(`/tickets?sent=${encodeURIComponent(to)}`);
+  // Only the old ticket's id goes in the link — the page looks up who it went to (no text from the URL is shown)
+  redirect(`/tickets?sent=${id}`);
 }

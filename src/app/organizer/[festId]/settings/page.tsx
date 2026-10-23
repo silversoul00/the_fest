@@ -5,12 +5,15 @@ import { festFormFields } from '@/lib/fest-form';
 import { addMember, setAllowTransfers, cancelFestAction, removeMember, setFestStatus, updateFest } from '../../actions';
 import { ActionForm, Submit } from '@/components/forms';
 import { siteUrlOrNull } from '@/lib/env';
+import { sql } from '@/lib/db';
 
 export default async function Settings({ params }: { params: Promise<{ festId: string }> }) {
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
   const site = siteUrlOrNull() ?? '';
   const members = await getMembers(fest.id);
+  const [{ holders }] = await sql<{ holders: number }[]>`
+    select count(distinct user_id)::int as holders from tickets where fest_id = ${fest.id} and status <> 'void'`;
 
   const StatusBtn = ({ to, label, cls }: { to: string; label: string; cls: string }) => (
     <form action={setFestStatus}>
@@ -56,7 +59,7 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
 
       <div className="card">
         <div className="h3 mb16">Fest details</div>
-        <FestForm action={updateFest} fest={festFormFields(fest)} />
+        <FestForm action={updateFest} fest={festFormFields(fest)} holders={holders} live={fest.status === 'live'} />
       </div>
       <div className="card stack g12" id="team">
         <div className="h3">Co-organizers</div>

@@ -100,6 +100,15 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 - Organizer "Must" list (proposed): Competitions, Digital certificates, Quick setup / copy last year, Volunteer shifts.
   Should: committee budget, vendor marketplace (certificate makers, medal makers, canopy etc.), feedback/polls, crowd view.
 
+## Bug-hunt fixes (Oct 23, 2026)
+- Harshith said "Build fix" for the full bug hunt (`docs/team/reviews/2026-10-23-full-bug-hunt.md`): fix H1, M1, M2, M3, M5
+  and L1–L9.
+- **M4** decided by Harshith (Oct 23, 2026): **"Allow + email buyers"**. Once a fest has sold tickets, changing its dates,
+  venue or name emails every ticket holder what changed (old → new), in the background. Renaming a **live** fest sends it
+  back to admin review (status "review", note visible to organizer and admin); the organizer is warned before saving
+  ("This sends the fest back to admin review and emails N ticket holders") and must tick "I understand". New dates that
+  would drop already-sold lunch days are blocked with a clear message. Nothing changes when no tickets are sold.
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.

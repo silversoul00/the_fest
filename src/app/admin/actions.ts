@@ -46,6 +46,8 @@ export async function recordPayout(_: ActionState, fd: FormData): Promise<Action
   const f = await festFrom(fd);
   const amount = Math.round(Number(s(fd, 'amount')) * 100);
   if (!Number.isFinite(amount) || amount <= 0) return { error: 'Enter the amount you transferred, in rupees.' };
+  // payouts.amount_paise is a Postgres int (max ₹2.14 crore) — keep a round, friendly limit below it
+  if (amount > 2_000_000_00) return { error: 'One payout can be at most ₹2 crore. Record a bigger transfer as two payouts.' };
   await sql`insert into payouts (fest_id, amount_paise, reference, note, created_by)
             values (${f.id}, ${amount}, ${s(fd, 'reference').slice(0, 60) || null}, ${s(fd, 'note').slice(0, 200) || null}, ${admin.id})`;
   revalidatePath('/admin', 'layout');

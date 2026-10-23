@@ -8,7 +8,8 @@ import { confirmUpiOrder, pasteAlerts, rejectUpiOrder, rotateInboundToken, saveU
 import { PasteAlertsForm, UploadStatementForm } from './CreditForms';
 import { siteUrlOrNull } from '@/lib/env';
 
-export default async function Payments({ params }: { params: Promise<{ festId: string }> }) {
+export default async function Payments({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ handled?: string }> }) {
+  const { handled } = await searchParams;
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
   const site = siteUrlOrNull() ?? '';
@@ -31,6 +32,7 @@ export default async function Payments({ params }: { params: Promise<{ festId: s
   return (
     <div className="stack g16">
       <h1 className="h2">Payments</h1>
+      {handled && <div className="alert info" role="status">That order was already confirmed or rejected (maybe in another tab or by a co-organizer). The list below is up to date.</div>}
 
       <div className="card stack g12">
         <div className="h3">Zero-fee UPI</div>

@@ -46,7 +46,7 @@ async def main():
         sc = await b.new_context(viewport={'width': 390, 'height': 844}); st = await login(sc, 'student@thefest.in')
         # 1) Buy, enter UTR, organizer pastes alert → confirmed
         amt1, o1 = await buy_upi(st, '512345678901')
-        check('UPI order waits for confirmation', await st.locator('text=confirming with the fest').count() >= 1, amt1)
+        check('UPI order waits for confirmation', await st.locator('text=we’ll confirm once the payment is seen').count() >= 1, amt1)
         rupees = amt1.replace('₹', '').replace(',', '')
         await org.goto(f'{B}/organizer/{fid}/payments')
         await org.fill('textarea[name=alerts]', f'Dear Customer, Rs.{rupees} has been credited to your A/c XX1234 by VPA arjun@okaxis. UPI Ref No 512345678901.')

@@ -7,13 +7,10 @@ import {
   normalizeEmail, loginBlockedMessage, PORTAL, verifyPassword,
 } from '@/lib/auth';
 import { sendVerification } from '@/lib/verify';
+import { safeNext } from '@/lib/format';
 import { reportError } from '@/lib/errors';
 import type { ActionState, Role } from '@/lib/types';
 
-const safeNext = (n: FormDataEntryValue | null) => {
-  const s = typeof n === 'string' ? n : '';
-  return s.startsWith('/') && !s.startsWith('//') ? s : '';
-};
 
 const SignupSchema = z.object({
   role: z.enum(['student', 'organizer', 'sponsor']),

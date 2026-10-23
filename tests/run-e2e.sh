@@ -14,6 +14,7 @@ PSQL="psql $DB_URL -qtA -F ' '"
 node scripts/check-pricing.mjs 2>/dev/null
 node scripts/check-upi-parse.mjs 2>/dev/null
 node --conditions=react-server scripts/check-qr2.mjs 2>/dev/null
+node scripts/check-format.mjs 2>/dev/null
 
 # Stop any server already on :3000
 for d in /proc/[0-9]*; do c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true); case "$c" in next-server*) kill "${d#/proc/}" 2>/dev/null || true;; esac; done
@@ -75,4 +76,8 @@ python3 tests/sponsor_leads.py
 # requests both ways, accept → sponsors row (double-click safe), limits, side checks, contacts after accept,
 # co-organizers, 390px, old database without v2.6 (:3008)
 python3 tests/sponsor_requests.py
+# Bug-hunt fixes (2026-10-23): safe ?next= redirects, number limits, two-tab Confirm/Reject, fest changes after tickets are
+# sold (holders emailed, rename → review, sold lunch days kept), Kannada/Hindi slugs, UTR/past-date/reset-link/?sent= fixes,
+# whole-letter cuts, budget hints, Sales paging, no hydration errors
+python3 tests/bugfix_oct23.py
 echo "✓ Release check passed"

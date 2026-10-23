@@ -2,7 +2,8 @@ import Link from 'next/link';
 import type { CSSProperties } from 'react';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
-import { dateRange, rupees, todayIST } from '@/lib/format';
+import { cutText, dateRange, rupees, todayIST } from '@/lib/format';
+import { isUuid } from '@/lib/http';
 import { Empty } from '@/components/ui';
 import { AutoRefresh } from '@/components/AutoRefresh';
 
@@ -40,6 +41,12 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
   const refunds = await sql<{ id: string; fest_name: string; refunded_paise: number; refund_note: string | null; method: string; refund_status: string | null }[]>`
     select o.id, f.name as fest_name, o.refunded_paise, o.refund_note, o.method, o.refund_status from orders o join fests f on f.id = o.fest_id
     where o.user_id = ${user.id} and o.refunded_paise > 0 and o.refunded_at > now() - interval '30 days' order by o.refunded_at desc`;
+  // "Ticket sent to …": the name comes from the transfer this student made, never from the link
+  const [sentTo] = sent && isUuid(sent)
+    ? await sql<{ name: string }[]>`
+        select n.holder_name as name from tickets o join tickets n on n.id = o.transferred_to
+        where o.id = ${sent} and o.user_id = ${user.id}`
+    : [];
   const today = todayIST();
   const upcoming = rows.filter((r) => r.ends_on >= today);
   const past = rows.filter((r) => r.ends_on < today);
@@ -50,7 +57,7 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
       <h1 className="h2 mt8">My tickets</h1>
       {pending.some((p) => p.utr) && <AutoRefresh seconds={20} stopAfterMinutes={10} />}
 
-      {sent && <div className="alert ok">Ticket sent to {sent.slice(0, 60)}. Their new QR is in their account.</div>}
+      {sentTo && <div className="alert ok wrap-anywhere">Ticket sent to {cutText(sentTo.name, 60)}. Their new QR is in their account.</div>}
       {fresh.length > 0 && (
         <div className="alert ok">🎉 You&apos;re in! {fresh.length} ticket{fresh.length > 1 ? 's' : ''} for {fresh[0].fest_name}. Show the QR at the gate.</div>
       )}
@@ -61,7 +68,7 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
           <span className="grow">
             <strong>{p.fest_name}</strong> · {p.qty} ticket{p.qty > 1 ? 's' : ''} · <span className="mono">{rupees(p.amount_paise)}</span>
             <span className="xs muted" style={{ display: 'block' }}>
-              {p.utr ? (p.review_flag ? `Organizer is checking: ${p.review_flag}` : 'Payment received, confirming with the fest…') : 'Waiting for your UPI payment — tap to pay or enter the UTR'}
+              {p.utr ? (p.review_flag ? `Organizer is checking: ${p.review_flag}` : 'UTR sent — we’ll confirm once the payment is seen in the fest’s account.') : 'Waiting for your UPI payment — tap to pay or enter the UTR'}
             </span>
           </span>
           <span className="muted">→</span>

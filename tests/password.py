@@ -45,9 +45,10 @@ async def main():
         await login(fresh, 'student@thefest.in', 'newpass123')
         check('new password works', fresh.url.endswith('/fests'))
         await fresh.goto(B + path)
-        await fresh.fill('input[name=password]', 'another123'); await fresh.fill('input[name=confirm]', 'another123')
-        await fresh.click('button[type=submit]'); await fresh.wait_for_selector('.alert.error')
-        check('reset link works only once', 'expired or was already used' in await fresh.text_content('.alert.error'))
+        # Bug hunt L5 (2026-10-23): a used link says so straight away — no password form to type into
+        await fresh.wait_for_selector('.alert.error')
+        check('reset link works only once', 'expired or was already used' in await fresh.text_content('.alert.error')
+              and await fresh.locator('input[name=password]').count() == 0)
         # put the demo password back for other tests
         await fresh.goto(B + '/forgot-password'); await fresh.fill('input[name=email]', 'student@thefest.in'); await fresh.click('button[type=submit]'); await fresh.wait_for_selector('.alert.ok')
         body = q("select body_text from email_outbox where to_email='student@thefest.in' and subject like 'Reset%' order by id desc limit 1")

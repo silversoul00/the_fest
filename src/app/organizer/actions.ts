@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
-import { rupees, slugify } from '@/lib/format';
+import { clip, dateRange, festSlug, rupees, todayIST } from '@/lib/format';
 import { cancelFest, refundOrder } from '@/lib/refunds';
 import { OrderError } from '@/lib/orders';
 import { boothCode } from '@/lib/ticket-crypto';
@@ -15,7 +15,7 @@ import { siteUrl } from '@/lib/env';
 import { afterResponse } from '@/lib/errors';
 import { notifySponsorRequest, sendEmail } from '@/lib/mail';
 import {
-  REQUESTS_MISSING, SEND_NEEDS_LIVE, createRequest, decideRequest, parseRequestFields, requestsReady, visibleToBrands, type Decision,
+  LIMITS, REQUESTS_MISSING, SEND_NEEDS_LIVE, createRequest, toPaise, decideRequest, parseRequestFields, requestsReady, visibleToBrands, type Decision,
 } from '@/lib/sponsor-requests';
 import { matchCredits, confirmManually, rejectUpiOrder as rejectUpi, newInboundToken } from '@/lib/upi';
 import { parseAlerts, parseCsv, parseStatement, VPA_RE, type Credit } from '@/lib/upi-parse';
@@ -26,6 +26,19 @@ import type { ActionState } from '@/lib/types';
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
 const rupeesToPaise = (v: string) => Math.round(Number(v || 0) * 100);
 const first = (e: z.ZodError) => ({ error: e.issues[0].message });
+/** Postgres `int` columns hold up to 2,147,483,647 — every number is checked against a friendly limit below that first. */
+const MAX_CAPACITY = 1_000_000;
+const MAX_TICKET_PRICE_PAISE = 10_000_00;
+/** Fest's total capacity: empty = no limit; otherwise a whole number 1 … 10,00,000. */
+function capacityOf(v: string | undefined): { value: number | null } | { error: string } {
+  const t = (v ?? '').trim();
+  if (!t || t === '0') return { value: null };
+  const n = Number(t);
+  if (!Number.isInteger(n) || n < 1) return { error: 'Capacity must be a whole number (or leave it empty for no limit).' };
+  if (n > MAX_CAPACITY) return { error: 'Capacity can be at most 10,00,000 people.' };
+  return { value: n };
+}
+const isUniqueViolation = (e: unknown) => (e as { code?: string })?.code === '23505';
 
 /**
  * Ensures the signed-in organizer runs the fest named in the form (owner or co-organizer).
@@ -67,42 +80,113 @@ export async function createFest(_: ActionState, fd: FormData): Promise<ActionSt
   const p = FestSchema.safeParse(Object.fromEntries(fd));
   if (!p.success) return first(p.error);
   const d = p.data;
+  if (d.starts_on < todayIST()) return { error: 'The start date can’t be in the past.' };
+  const cap = capacityOf(d.capacity);
+  if ('error' in cap) return cap;
 
-  const tName = s(fd, 'ticket_name') || 'General Entry';
+  const tName = clip(s(fd, 'ticket_name') || 'General Entry', 60);
   const tPrice = rupeesToPaise(s(fd, 'ticket_price'));
   const tQuota = Number(s(fd, 'ticket_quota') || 500);
-  if (tPrice < 0 || tPrice > 10_000_00) return { error: 'Ticket price must be between ₹0 and ₹10,000' };
+  if (!Number.isFinite(tPrice) || tPrice < 0 || tPrice > MAX_TICKET_PRICE_PAISE) return { error: 'Ticket price must be between ₹0 and ₹10,000' };
   if (!Number.isInteger(tQuota) || tQuota < 1 || tQuota > 100000) return { error: 'Ticket quantity must be between 1 and 100,000' };
 
-  // Unique slug: name, then name-year, then name-random
-  let slug = slugify(s(fd, 'slug') || d.name);
-  if (slug.length < 3) slug = `${slug}-fest`;
+  // Unique slug: name (any Indian script is transliterated; college/city/year if that is empty), then name-year, then name-random
+  let slug = festSlug({ slug: s(fd, 'slug'), name: d.name, college: d.college, city: d.city, starts_on: d.starts_on });
   const taken = async (x: string) => (await sql`select 1 from fests where slug = ${x}`).length > 0;
   if (await taken(slug)) slug = `${slug}-${d.starts_on.slice(0, 4)}`.slice(0, 48);
   while (await taken(slug)) slug = `${slug.slice(0, 42)}-${Math.random().toString(36).slice(2, 6)}`;
 
-  const capacity = d.capacity ? Number(d.capacity) : null;
+  const capacity = cap.value;
   const [f] = await sql<{ id: string }[]>`
     insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, description, emoji, accent, capacity)
     values (${slug}, ${user.id}, ${d.name}, ${d.college}, ${d.city}, ${d.venue || null}, ${d.category}, ${d.starts_on}, ${d.ends_on},
-            ${d.description ?? ''}, ${d.emoji}, ${d.accent}, ${capacity && capacity > 0 ? capacity : null})
+            ${d.description ?? ''}, ${d.emoji}, ${d.accent}, ${capacity})
     returning id`;
   await sql`insert into ticket_types (fest_id, name, price_paise, quota) values (${f.id}, ${tName}, ${tPrice}, ${tQuota})`;
   redirect(`/organizer/${f.id}?created=1`);
 }
 
+/**
+ * Saving fest details. Once tickets are sold (Harshith, Oct 23 2026: "Allow + email buyers"):
+ * - changing the name, dates or venue emails every ticket holder what changed (old → new), in the background;
+ * - renaming a live fest sends it back to THE FEST for review (tickets pause until approved);
+ * - the organizer must tick "I understand" first (the form shows the warning; the server checks it too);
+ * - new dates may not drop lunch days that were already sold.
+ */
 export async function updateFest(_: ActionState, fd: FormData): Promise<ActionState> {
   const { fest } = await ownFest(fd);
   const p = FestSchema.safeParse(Object.fromEntries(fd));
   if (!p.success) return first(p.error);
   const d = p.data;
-  const capacity = d.capacity ? Number(d.capacity) : null;
-  await sql`update fests set name = ${d.name}, college = ${d.college}, city = ${d.city}, venue = ${d.venue || null},
+  const cap = capacityOf(d.capacity);
+  if ('error' in cap) return cap;
+  const venue = d.venue || null;
+
+  const r = await sql.begin(async (tx) => {
+    const [cur] = await tx<{ name: string; starts_on: string; ends_on: string; venue: string | null; status: string; slug: string }[]>`
+      select name, starts_on, ends_on, venue, status::text, slug from fests where id = ${fest.id} for update`;
+    const datesChanged = cur.starts_on !== d.starts_on || cur.ends_on !== d.ends_on;
+    if (cur.starts_on !== d.starts_on && d.starts_on < todayIST()) return { error: 'The new start date can’t be in the past.' } as const;
+    const nameChanged = cur.name !== d.name;
+    const venueChanged = (cur.venue ?? '') !== (venue ?? '');
+    const holders = (nameChanged || datesChanged || venueChanged)
+      ? (await tx<{ email: string }[]>`
+          select distinct u.email::text as email from tickets t join users u on u.id = t.user_id
+          where t.fest_id = ${fest.id} and t.status <> 'void'`).map((h) => h.email)
+      : [];
+    const toReview = holders.length > 0 && nameChanged && cur.status === 'live';
+    if (holders.length && datesChanged) {
+      const lost = await tx<{ name: string; d: string }[]>`
+        select tt.name, d::text as d from ticket_types tt, unnest(tt.lunch_days) d
+        where tt.fest_id = ${fest.id} and (d < ${d.starts_on}::date or d > ${d.ends_on}::date)
+          and (tt.sold > 0 or exists (select 1 from orders o where o.ticket_type_id = tt.id and o.status = 'paid'))
+        order by d`;
+      if (lost.length) {
+        const days = [...new Set(lost.map((l) => dateRange(l.d, l.d)))].join(', ');
+        return { error: `Lunch on ${days} is already sold (${[...new Set(lost.map((l) => l.name))].join(', ')}) and would fall outside the new dates. Keep ${lost.length > 1 ? 'those days' : 'that day'} in the fest, or refund those tickets first.` } as const;
+      }
+    }
+    if (holders.length && fd.get('confirm_notice') !== 'on') {
+      return { error: `${toReview ? 'This sends the fest back to THE FEST for review (ticket sales pause until it is approved) and emails' : 'This emails'} ${holders.length} ticket holder${holders.length === 1 ? '' : 's'} about the change. Tick “I understand” and save again.` } as const;
+    }
+    await tx`update fests set name = ${d.name}, college = ${d.college}, city = ${d.city}, venue = ${venue},
               category = ${d.category}, starts_on = ${d.starts_on}, ends_on = ${d.ends_on}, description = ${d.description ?? ''},
-              emoji = ${d.emoji}, accent = ${d.accent}, capacity = ${capacity && capacity > 0 ? capacity : null}
+              emoji = ${d.emoji}, accent = ${d.accent}, capacity = ${cap.value}
             where id = ${fest.id}`;
+    if (toReview) {
+      await tx`update fests set status = 'review', approved_at = null,
+                 review_note = ${`Renamed from “${cur.name}” to “${d.name}” after tickets were sold — please check again.`.slice(0, 300)}
+               where id = ${fest.id}`;
+    }
+    const changes = [
+      nameChanged && `Name: ${cur.name} → ${d.name}`,
+      datesChanged && `Dates: ${dateRange(cur.starts_on, cur.ends_on)} → ${dateRange(d.starts_on, d.ends_on)}`,
+      venueChanged && `Venue: ${cur.venue || 'not set'} → ${venue || 'not set'}`,
+    ].filter(Boolean) as string[];
+    return { holders, changes, toReview, oldName: cur.name, slug: cur.slug } as const;
+  });
+  if ('error' in r) return { error: r.error };
+
+  if (r.holders.length) {
+    const subject = `${d.name}: fest details have changed`;
+    const body = [
+      `The organizers of ${r.oldName} changed some details of the fest you have a ticket for:`,
+      '',
+      ...r.changes.map((c) => `• ${c}`),
+      '',
+      'Your ticket stays valid — you don’t need to do anything.',
+      `See your tickets: ${siteUrl()}/tickets`,
+      '',
+      '— THE FEST',
+    ].join('\n');
+    await afterResponse('fest change emails', async () => {
+      for (const email of r.holders) await sendEmail(email, subject, body);
+    });
+  }
   refresh(fest.id);
-  return { ok: true, message: 'Saved.' };
+  revalidatePath(`/fests/${r.slug}`);
+  if (r.toReview) return { ok: true, message: `Saved. The new name goes to THE FEST for a quick check — ticket sales pause until it’s approved. ${r.holders.length} ticket holder(s) are being emailed.` };
+  return { ok: true, message: r.holders.length ? `Saved. ${r.holders.length} ticket holder(s) are being emailed about the change.` : 'Saved.' };
 }
 
 export async function setFestStatus(fd: FormData) {
@@ -142,7 +226,7 @@ export async function addTicketType(_: ActionState, fd: FormData): Promise<Actio
   const p = TicketSchema.safeParse(Object.fromEntries(fd));
   if (!p.success) return first(p.error);
   const price = rupeesToPaise(p.data.price);
-  if (price > 10_000_00) return { error: 'Max ticket price is ₹10,000' };
+  if (price > MAX_TICKET_PRICE_PAISE) return { error: 'Max ticket price is ₹10,000' };
   const perks = perksFrom(fd, fest);
   if ('error' in perks) return { error: perks.error };
   if (perks.kind === 'addon' && perks.days === '{}' && !perks.stay) return { error: 'An add-on needs lunch days or stay.' };
@@ -170,6 +254,7 @@ export async function updateTicketType(_: ActionState, fd: FormData): Promise<Ac
   if (perks.kind !== t.kind && t.orders > 0) return { error: 'People have already ordered this — it can’t switch between ticket and add-on.' };
   if (perks.kind === 'addon' && perks.days === '{}' && !perks.stay) return { error: 'An add-on needs lunch days or stay.' };
   const price = rupeesToPaise(p.data.price);
+  if (price > MAX_TICKET_PRICE_PAISE) return { error: 'Max ticket price is ₹10,000' };
   await sql`update ticket_types set name = ${p.data.name}, description = ${p.data.description ?? ''},
               price_paise = ${price}, quota = ${p.data.quota},
               kind = ${perks.kind}, lunch_days = ${perks.days}::date[], includes_stay = ${perks.stay} where id = ${id}`;
@@ -194,7 +279,7 @@ export async function addEvent(_: ActionState, fd: FormData): Promise<ActionStat
   let b = IST_TS(date, end);
   if (b <= a) b = new Date(b.getTime() + 864e5); // ends after midnight
   await sql`insert into schedule_events (fest_id, title, venue, category, starts_at, ends_at)
-            values (${fest.id}, ${title.slice(0, 120)}, ${venue.slice(0, 120)}, ${s(fd, 'category') || 'event'}, ${a}, ${b})`;
+            values (${fest.id}, ${clip(title, 120)}, ${clip(venue, 120)}, ${s(fd, 'category') || 'event'}, ${a}, ${b})`;
   refresh(fest.id);
   return { ok: true, message: 'Added to schedule.' };
 }
@@ -215,7 +300,7 @@ export async function addStaff(_: ActionState, fd: FormData): Promise<ActionStat
   const duty = s(fd, 'duty') || 'Gate 1';
   const canScan = fd.get('can_scan') === 'on';
   const r = await sql`insert into fest_staff (fest_id, email, name, duty, can_scan)
-                      values (${fest.id}, ${email}, ${name.slice(0, 80)}, ${duty.slice(0, 60)}, ${canScan})
+                      values (${fest.id}, ${email}, ${clip(name, 80)}, ${clip(duty, 60)}, ${canScan})
                       on conflict (fest_id, email) do nothing returning id`;
   if (!r.length) return { error: 'That email is already on your team' };
   refresh(fest.id);
@@ -259,7 +344,7 @@ export async function postAnnouncement(_: ActionState, fd: FormData): Promise<Ac
   const title = s(fd, 'title');
   if (title.length < 3) return { error: 'Write a short headline' };
   await sql`insert into announcements (fest_id, title, body, urgent)
-            values (${fest.id}, ${title.slice(0, 120)}, ${s(fd, 'body').slice(0, 1000)}, ${fd.get('urgent') === 'on'})`;
+            values (${fest.id}, ${clip(title, 120)}, ${clip(s(fd, 'body'), 1000)}, ${fd.get('urgent') === 'on'})`;
   refresh(fest.id);
   revalidatePath(`/fests/${fest.slug}`);
   return { ok: true, message: 'Posted — it’s live on your fest page.' };
@@ -279,13 +364,17 @@ export async function addSponsor(_: ActionState, fd: FormData): Promise<ActionSt
   if (brand.length < 2) return { error: 'Enter the brand name' };
   if (!z.string().email().safeParse(email).success) return { error: 'Enter the sponsor’s email' };
   const tier = s(fd, 'tier') || 'Associate';
-  const amount = rupeesToPaise(s(fd, 'amount'));
-  if (!Number.isFinite(amount) || amount < 0) return { error: 'Enter the deal amount in rupees' };
+  const rawAmount = s(fd, 'amount');
+  const amount = toPaise(rawAmount);
+  if (rawAmount.startsWith('-')) return { error: 'The deal amount can’t be negative.' };
+  if (!Number.isFinite(amount)) return { error: 'Enter the deal amount in rupees, like 50000 or 12345.50.' };
+  if (amount > LIMITS.amountMaxPaise) return { error: 'The deal amount can be at most ₹1 crore.' };
   try {
     await sql`insert into sponsors (fest_id, email, brand, tier, amount_paise, booth_code)
-              values (${fest.id}, ${email}, ${brand.slice(0, 80)}, ${tier.slice(0, 40)}, ${amount}, ${boothCode()})`;
-  } catch {
-    return { error: 'This sponsor is already added' };
+              values (${fest.id}, ${email}, ${clip(brand, 80)}, ${clip(tier, 40)}, ${amount}, ${boothCode()})`;
+  } catch (e) {
+    if (isUniqueViolation(e)) return { error: 'This sponsor is already added' };
+    throw e;
   }
   refresh(fest.id);
   return { ok: true, message: `${brand} added. They sign up as a Sponsor with ${email} to see live numbers.` };
@@ -367,7 +456,7 @@ export async function saveUpiSettings(_: ActionState, fd: FormData): Promise<Act
   const { fest } = await ownFest(fd, { ownerOnly: true });
   const enabled = fd.get('upi_enabled') === 'on';
   const vpa = s(fd, 'upi_vpa');
-  const name = s(fd, 'upi_name').slice(0, 60);
+  const name = clip(s(fd, 'upi_name'), 60);
   if (enabled && !VPA_RE.test(vpa)) return { error: 'Enter the fest’s UPI ID, like neonutsav@icici' };
   await sql`update fests set upi_enabled = ${enabled}, upi_vpa = ${vpa || null}, upi_name = ${name || null} where id = ${fest.id}`;
   refresh(fest.id);
@@ -417,18 +506,36 @@ export async function uploadStatement(_: PaymentsState, fd: FormData): Promise<P
   return { ok: true, message: `${credits.length} credits read · ${summary(r)}`, result: r };
 }
 
+const ALREADY_HANDLED = 'Order not found or already handled.';
+/** A second tab / co-organizer got there first: show a calm note on a fresh list instead of an error page. */
+const handledElsewhere = (festId: string) => {
+  refresh(festId);
+  redirect(`/organizer/${festId}/payments?handled=1`);
+};
+
 export async function confirmUpiOrder(fd: FormData) {
   const { fest } = await ownFest(fd);
   if (!isUuid(s(fd, 'orderId'))) return;
+  let handled = false;
   try { await confirmManually(s(fd, 'orderId'), fest.id); }
-  catch (e) { if (!(e instanceof OrderError)) throw e; /* flagged on the order (e.g. refund needed) */ }
+  catch (e) {
+    if (!(e instanceof OrderError)) throw e; /* other OrderErrors are flagged on the order (e.g. refund needed) */
+    handled = e.message === ALREADY_HANDLED;
+  }
+  if (handled) handledElsewhere(fest.id);
   refresh(fest.id);
 }
 
 export async function rejectUpiOrder(fd: FormData) {
   const { fest } = await ownFest(fd);
   if (!isUuid(s(fd, 'orderId'))) return;
-  await rejectUpi(s(fd, 'orderId'), fest.id, s(fd, 'note') || 'No matching payment in the bank account');
+  let handled = false;
+  try { await rejectUpi(s(fd, 'orderId'), fest.id, s(fd, 'note') || 'No matching payment in the bank account'); }
+  catch (e) {
+    if (!(e instanceof OrderError)) throw e;
+    handled = true;
+  }
+  if (handled) handledElsewhere(fest.id);
   refresh(fest.id);
 }
 

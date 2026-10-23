@@ -2,7 +2,8 @@
 
 export type Credit = { utr: string | null; amountPaise: number; raw: string };
 
-export const UTR_RE = /^\d{12}$/;
+/** 12 digits, and not the same digit twelve times (000000000000 is never a real UPI reference). */
+export const UTR_RE = /^(?!(\d)\1{11}$)\d{12}$/;
 export const VPA_RE = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/;
 
 export function upiLink(vpa: string, payee: string, amountPaise: number, note: string) {

@@ -44,7 +44,9 @@ export async function saveBrandProfile(_: ActionState, fd: FormData): Promise<Ac
   const cities = [...new Set(str(fd, 'cities').split(',').map((c) => c.trim()).filter(Boolean))];
   if (brand.length < 2 || brand.length > LIMITS.brand) return { error: `Brand name: 2 to ${LIMITS.brand} characters.` };
   if (!(category in BRAND_CATEGORIES)) return { error: 'Pick a category.' };
-  if (![min, max].every((v) => Number.isFinite(v) && v >= 0 && v <= LIMITS.amountMaxPaise)) return { error: 'Enter the budget in rupees (up to ₹1 crore).' };
+  if ([str(fd, 'budget_min'), str(fd, 'budget_max')].some((v) => v.startsWith('-'))) return { error: 'The budget can’t be negative.' };
+  if (![min, max].every((v) => Number.isFinite(v))) return { error: 'Enter the budget in rupees, like 50000.' };
+  if (![min, max].every((v) => v <= LIMITS.amountMaxPaise)) return { error: 'The budget can be at most ₹1 crore.' };
   if (max && min > max) return { error: 'The lowest budget is more than the highest.' };
   if (cities.length > LIMITS.cities || cities.some((c) => c.length > LIMITS.city)) return { error: `Up to ${LIMITS.cities} cities, separated by commas.` };
   if (about.length > LIMITS.about) return { error: `Keep "about" to ${LIMITS.about} characters.` };

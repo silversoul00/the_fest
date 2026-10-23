@@ -1,6 +1,6 @@
 import { requireUser } from '@/lib/auth';
 import { getOwnFest, getSponsors } from '@/lib/queries';
-import { num, rupees } from '@/lib/format';
+import { num, rupees, graphemes } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty, Stat } from '@/components/ui';
 import Link from 'next/link';
@@ -99,7 +99,7 @@ export default async function Sponsors({ params, searchParams }: { params: Promi
           {sponsors.map((s) => (
             <div key={s.id} className="li stack g12" style={{ alignItems: 'stretch' }} data-sponsor={s.id}>
               <div className="row g12" style={{ alignItems: 'flex-start' }}>
-                <div className="avatar" style={{ color: 'var(--blue)' }}>{s.brand.slice(0, 2).toUpperCase()}</div>
+                <div className="avatar" style={{ color: 'var(--blue)' }}>{graphemes(s.brand).slice(0, 2).join('').toUpperCase()}</div>
                 <div className="grow" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                   <div>{s.brand} <span className="badge blue" style={{ marginLeft: 4 }}>{s.tier}</span></div>
                   <div className="xs muted">{s.email} · {rupees(s.amount_paise)}</div>

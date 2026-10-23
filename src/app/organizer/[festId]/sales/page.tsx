@@ -1,18 +1,24 @@
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { getOwnFest } from '@/lib/queries';
-import { ago, num, rupees } from '@/lib/format';
+import Link from 'next/link';
+import { dayLabel, num, rupees, time } from '@/lib/format';
 import { Empty, Stat } from '@/components/ui';
 import { ActionForm, Submit } from '@/components/forms';
 import { markUpiRefundSent, refundOrderAction } from '../../actions';
 
-export default async function Sales({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ q?: string }> }) {
+const PER_PAGE = 50;
+
+export default async function Sales({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ q?: string; page?: string }> }) {
   const user = await requireUser('organizer');
   const fest = await getOwnFest((await params).festId, user);
-  const { q = '' } = await searchParams;
+  const { q = '', page: rawPage } = await searchParams;
   const like = q.trim() ? `%${q.trim()}%` : null;
+  const page = Math.min(1000, Math.max(1, Math.floor(Number(rawPage) || 1)));
+  const match = sql`o.fest_id = ${fest.id} and o.status in ('paid', 'refunded')
+        ${like ? sql`and (u.name ilike ${like} or u.email ilike ${like} or u.college ilike ${like})` : sql``}`;
 
-  const [byType, orders, toSend] = await Promise.all([
+  const [byType, orders, toSend, [{ total }]] = await Promise.all([
     sql<{ name: string; qty: number; gross: number; fees: number }[]>`
       select tt.name, (case when tt.kind = 'addon' then (select count(*) from orders a where a.ticket_type_id = tt.id and a.status = 'paid')
                             else (select count(*) from tickets t where t.ticket_type_id = tt.id and t.status <> 'void') end)::int qty,
@@ -25,15 +31,17 @@ export default async function Sales({ params, searchParams }: { params: Promise<
                   else (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int end as unused,
              u.name, u.email::text, u.college, tt.name as type
       from orders o join users u on u.id = o.user_id join ticket_types tt on tt.id = o.ticket_type_id
-      where o.fest_id = ${fest.id} and o.status in ('paid', 'refunded')
-        ${like ? sql`and (u.name ilike ${like} or u.email ilike ${like} or u.college ilike ${like})` : sql``}
-      order by o.paid_at desc limit 200`,
+      where ${match}
+      order by o.paid_at desc, o.id limit ${PER_PAGE} offset ${(page - 1) * PER_PAGE}`,
     // Bank-UPI money to send back: refunds, and payments that arrived too late to become tickets
     sql<{ id: string; name: string; email: string; utr: string | null; refunded_paise: number }[]>`
       select o.id, u.name, u.email::text, o.utr, o.refunded_paise
       from orders o join users u on u.id = o.user_id
       where o.fest_id = ${fest.id} and o.refund_status = 'manual_pending' order by o.refunded_at`,
+    sql<{ total: number }[]>`select count(*)::int as total from orders o join users u on u.id = o.user_id where ${match}`,
   ]);
+  const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const pageHref = (n: number) => `/organizer/${fest.id}/sales?${new URLSearchParams({ ...(q ? { q } : {}), ...(n > 1 ? { page: String(n) } : {}) })}`;
 
   const totals = byType.reduce((a, t) => ({ qty: a.qty + t.qty, gross: a.gross + t.gross, fees: a.fees + t.fees }), { qty: 0, gross: 0, fees: 0 });
 
@@ -91,7 +99,8 @@ export default async function Sales({ params, searchParams }: { params: Promise<
                   <td className="small">{o.type}{o.provider === 'demo' && <span className="badge gray" style={{ marginLeft: 6 }}>demo</span>}</td>
                   <td className="num">{o.qty}</td>
                   <td className="num">{rupees(o.amount_paise)}{o.refunded_paise > 0 && <div className="xs c-orange">−{rupees(o.refunded_paise)} refunded</div>}</td>
-                  <td className="xs muted" style={{ whiteSpace: 'nowrap' }}>{ago(o.created_at)}</td>
+                  {/* A fixed IST date and time (not "5m ago"): the same text on every render, whatever the clock or the browser */}
+                  <td className="xs muted" style={{ whiteSpace: 'nowrap' }}>{o.created_at ? `${dayLabel(o.created_at)}, ${time(o.created_at)}` : '—'}</td>
                   <td style={{ minWidth: 120 }}>
                     {o.status === 'refunded' ? <span className="badge orange">Refunded</span> : !fest.is_owner ? null : o.unused > 0 ? (
                       <details>
@@ -113,6 +122,13 @@ export default async function Sales({ params, searchParams }: { params: Promise<
             </tbody>
           </table>
         </div>
+      )}
+      {total > PER_PAGE && (
+        <nav className="row between g8 small" aria-label="Pages">
+          {page > 1 ? <Link className="btn sm outline" href={pageHref(page - 1)}>← Newer</Link> : <span />}
+          <span className="muted">Orders {num((page - 1) * PER_PAGE + 1)}–{num(Math.min(total, page * PER_PAGE))} of {num(total)} · page {page} of {pages}</span>
+          {page < pages ? <Link className="btn sm outline" href={pageHref(page + 1)}>Older →</Link> : <span />}
+        </nav>
       )}
     </div>
   );

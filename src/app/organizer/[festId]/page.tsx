@@ -70,7 +70,7 @@ export default async function Overview({ params, searchParams }: { params: Promi
         </div>
       )}
       {fest.status === 'review' && (
-        <div className="alert info">Your fest is waiting for THE FEST&apos;s approval. You can keep editing everything meanwhile — you&apos;ll see it go live here once approved.</div>
+        <div className="alert info">Your fest is waiting for THE FEST&apos;s approval.{fest.review_note ? <> {fest.review_note}</> : null} You can keep editing everything meanwhile — you&apos;ll see it go live here once approved.</div>
       )}
       {fest.status === 'cancelled' && (
         <div className="alert error">This fest was cancelled{fest.cancelled_reason ? `: ${fest.cancelled_reason}` : ''}. Ticket sales are closed.</div>
