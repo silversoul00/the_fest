@@ -16,6 +16,17 @@ for (const bad of ['//example.org/phish', '/\\example.org', '\\\\example.org', '
   assert.equal(safeNext(bad), '', String(bad));
 }
 
+// N1 (re-test 1): non-ASCII paths are percent-encoded (a raw one crashes the redirect); broken encoding and
+// "/../" tricks that resolve to "//host" give ''
+assert.equal(safeNext('/fests/ನ'), '/fests/%E0%B2%A8');
+assert.equal(safeNext('/fests/%E0%B2%A8'), '/fests/%E0%B2%A8');
+assert.equal(safeNext('/\u200b/x'), '/%E2%80%8B/x');
+assert.equal(safeNext('/／/x'), '/%EF%BC%8F/x');
+for (const bad of ['/fests/%E0%A4', '/%ZZ', '/x%', '/..//example.org', '/.//example.org', '/%2e%2e//example.org', '/a/../..//example.org',
+  '/%2e%2e%2f%2fexample.org', '/\ud800x']) assert.equal(safeNext(bad), '', bad);
+for (const v of ['/fests/ನ', '/%E2%80%8B/x', '/x?y=ಕ#ನ']) assert.ok(/^[\x21-\x7e]+$/.test(safeNext(v)), v);
+assert.equal(safeNext('/a/../me'), '/a/../me');
+
 // M5: Indian-script names become readable slugs; never plain "fest"
 assert.equal(slugify('ನಮ್ಮ ಉತ್ಸವ नमस्ते Fest'), 'namma-utsava-namaste-fest');
 assert.equal(slugify('नमस्ते'), 'namaste');
@@ -27,6 +38,11 @@ assert.equal(festSlug({ ...base, name: 'Fest' }), 'fest-rv-college-bengaluru');
 assert.equal(festSlug({ ...base, name: '🎉🎉🎉' }), 'rv-college-bengaluru');
 assert.match(festSlug({ name: '祭り', college: '祭り', city: '東京', starts_on: '2026-11-20' }), /^fest-2026-[a-z0-9]{4}$/);
 for (const n of ['Fest', '🎉', 'Utsav 2026', '!!!']) assert.notEqual(festSlug({ ...base, name: n }), 'fest', n);
+// Supervisor F6: a long all-"fest" name still fits the database's 48 characters
+for (const f of [{ name: 'Fest '.repeat(10), college: 'Fest 2026', city: 'Utsav', starts_on: '2026-11-20' },
+  { name: 'Fest 2026 '.repeat(6), college: 'Festival', city: '2026', starts_on: '2026-11-20' }]) {
+  assert.match(festSlug(f), /^[a-z0-9-]{3,48}$/, festSlug(f));
+}
 
 // Whole letters: a Kannada letter with its vowel sign / an emoji is never split
 const kn = 'ಕ್ಷೇತ್ರ'.repeat(20);

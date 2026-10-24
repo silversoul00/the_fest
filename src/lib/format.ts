@@ -108,7 +108,8 @@ export function festSlug(f: { slug?: string; name: string; college: string; city
   let slug = slugify(f.slug || f.name);
   const generic = (x: string) => x.replace(/-?(fest|festival|utsav|utsava|\d+)-?/g, '').length < 3;
   if (generic(slug)) slug = slugify([f.name, f.college, f.city].map((x) => slugify(x)).filter(Boolean).join(' '));
-  if (generic(slug)) slug = `${slug ? slug + '-' : ''}fest-${year}-${Math.random().toString(36).slice(2, 6)}`;
+  // "-fest-2026-ab12" is 15 characters; keep the whole slug within the 48 the database allows
+  if (generic(slug)) slug = `${slug ? slug.slice(0, 33).replace(/-+$/, '') + '-' : ''}fest-${year}-${Math.random().toString(36).slice(2, 6)}`;
   return slug;
 }
 
@@ -135,7 +136,9 @@ export function cutText(s: string, max: number): string {
 /**
  * A redirect target typed or linked by a user ("?next=") is only followed when it is a path on this site:
  * starts with one "/", no "//" or backslash (browsers treat "/\\evil.com" as "//evil.com"), no control characters
- * or schemes — also after URL-decoding. Anything else gives '' (the caller then uses the portal).
+ * or schemes — also after URL-decoding, and also after "/../" segments are resolved ("/..//evil.com" is "//evil.com").
+ * Letters outside ASCII (e.g. "/fests/ನ") are sent percent-encoded: a raw one in the Location header crashes the
+ * redirect. Broken percent-encoding ("%ZZ", "%E0%A4") gives ''. Anything rejected gives '' (the caller then uses the portal).
  */
 export function safeNext(n: unknown): string {
   if (typeof n !== 'string' || n.length > 500) return '';
@@ -149,8 +152,18 @@ export function safeNext(n: unknown): string {
   for (const v of [n, d]) {
     if (!v.startsWith('/') || v.startsWith('//') || v.includes('\\') || /[\u0000-\u001f\u007f\s]/.test(v)) return '';
   }
-  try { if (new URL(n, 'https://thefest.invalid').origin !== 'https://thefest.invalid') return ''; } catch { return ''; }
-  return n;
+  // Header-safe: every character outside printable ASCII becomes %XX (a lone surrogate can't be encoded → '')
+  let out: string;
+  try { out = n.replace(/[^\x21-\x7e]/gu, (c) => encodeURIComponent(c)); } catch { return ''; }
+  if (out.length > 1500) return '';
+  const base = 'https://thefest.invalid';
+  try {
+    for (const v of [out, d]) {
+      const u = new URL(v, base);
+      if (u.origin !== base || u.pathname.startsWith('//') || u.pathname.includes('\\')) return '';
+    }
+  } catch { return ''; }
+  return out;
 }
 
 /** Today's date in India as 'YYYY-MM-DD' (fests run on IST, servers run on UTC). */

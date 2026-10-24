@@ -6,6 +6,7 @@ import { ago, num, rupees, time } from '@/lib/format';
 import { Stat } from '@/components/ui';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { setFestStatus } from '../actions';
+import { isRenameNote } from '@/lib/fest-form';
 
 export default async function Overview({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ created?: string }> }) {
   const user = await requireUser('organizer');
@@ -57,7 +58,9 @@ export default async function Overview({ params, searchParams }: { params: Promi
           <div>
             <div className="h3">Your fest is a draft</div>
             <div className="small soft">
-              {fest.review_note
+              {isRenameNote(fest.review_note)
+                ? <><span className="c-orange">{fest.review_note}</span> Submit it and THE FEST does a quick check of the new name before tickets go on sale again.</>
+                : fest.review_note
                 ? <>THE FEST sent it back: <span className="c-orange">{fest.review_note}</span> Fix this, then submit again.</>
                 : fest.approved_at ? 'Only you can see it. Publish to start selling tickets again.' : 'Only you can see it. Submit it for a quick check by THE FEST — tickets go on sale once approved (usually within a day).'}
             </div>

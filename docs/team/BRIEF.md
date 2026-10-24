@@ -108,6 +108,13 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   back to admin review (status "review", note visible to organizer and admin); the organizer is warned before saving
   ("This sends the fest back to admin review and emails N ticket holders") and must tick "I understand". New dates that
   would drop already-sold lunch days are blocked with a clear message. Nothing changes when no tickets are sold.
+- **Renames, decided by Harshith (Oct 23–24, 2026), after fix review 1:**
+  1. **Every rename of an admin-approved fest goes back to admin review — even with zero tickets sold** (the stricter
+     rule; this replaces "nothing changes when no tickets are sold" for renames). Ticket holders are emailed only when
+     tickets have been sold, as before. A draft or ended fest that is renamed goes to review on its next Publish/Reopen.
+  2. **While a renamed fest waits for review, its public fest page stays up for everyone** with a clear "Under review —
+     ticket sales paused" note: dates, schedule and announcements visible; buying disabled; existing tickets and gate
+     scanning keep working. Other non-public statuses (draft, first-time review of a never-approved fest) stay hidden as today.
 
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.

@@ -80,4 +80,10 @@ python3 tests/sponsor_requests.py
 # sold (holders emailed, rename → review, sold lunch days kept), Kannada/Hindi slugs, UTR/past-date/reset-link/?sent= fixes,
 # whole-letter cuts, budget hints, Sales paging, no hydration errors
 python3 tests/bugfix_oct23.py
+# Re-test gaps (2026-10-23-bugfix-test-1): Unpublish→rename→Publish skips review, Sales page past the end,
+# Sales hydration over 60 loads, non-ASCII ?next= crash
+python3 tests/bugfix_oct23_retest.py
+# Fix round 2 (2026-10-23-bugfix-review-1 / -test-1): End→rename→Reopen goes to review, rename note survives, tick appears
+# when the first ticket sells mid-edit, Sales last page, no #418 on a slow connection, ?next= with broken encoding
+python3 tests/bugfix_oct23_fix2.py
 echo "✓ Release check passed"

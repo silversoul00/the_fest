@@ -21,6 +21,7 @@ import { matchCredits, confirmManually, rejectUpiOrder as rejectUpi, newInboundT
 import { parseAlerts, parseCsv, parseStatement, VPA_RE, type Credit } from '@/lib/upi-parse';
 import type { MatchResult } from '@/lib/upi';
 import type { ActionState } from '@/lib/types';
+import { approvalRequired, changeNotice, isRenameNote, renameClearsApproval, renameNote, type RenameReview } from '@/lib/fest-form';
 
 // ─── helpers ──────────────────────────────────────────────
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
@@ -109,7 +110,9 @@ export async function createFest(_: ActionState, fd: FormData): Promise<ActionSt
 /**
  * Saving fest details. Once tickets are sold (Harshith, Oct 23 2026: "Allow + email buyers"):
  * - changing the name, dates or venue emails every ticket holder what changed (old → new), in the background;
- * - renaming a live fest sends it back to THE FEST for review (tickets pause until approved);
+ * - renaming clears THE FEST's approval (see renameClearsApproval: always with tickets sold; with none sold too while
+ *   RENAME_REVIEW_WITHOUT_TICKETS is on). A live fest goes to review at once; a draft or ended one goes to review
+ *   on its next Publish/Reopen — so Unpublish → rename → Publish can't skip the check;
  * - the organizer must tick "I understand" first (the form shows the warning; the server checks it too);
  * - new dates may not drop lunch days that were already sold.
  */
@@ -123,8 +126,9 @@ export async function updateFest(_: ActionState, fd: FormData): Promise<ActionSt
   const venue = d.venue || null;
 
   const r = await sql.begin(async (tx) => {
-    const [cur] = await tx<{ name: string; starts_on: string; ends_on: string; venue: string | null; status: string; slug: string }[]>`
-      select name, starts_on, ends_on, venue, status::text, slug from fests where id = ${fest.id} for update`;
+    const [cur] = await tx<{ name: string; starts_on: string; ends_on: string; venue: string | null; status: string; slug: string; approved: boolean; review_note: string | null }[]>`
+      select name, starts_on, ends_on, venue, status::text, slug, approved_at is not null as approved, review_note
+      from fests where id = ${fest.id} for update`;
     const datesChanged = cur.starts_on !== d.starts_on || cur.ends_on !== d.ends_on;
     if (cur.starts_on !== d.starts_on && d.starts_on < todayIST()) return { error: 'The new start date can’t be in the past.' } as const;
     const nameChanged = cur.name !== d.name;
@@ -134,7 +138,11 @@ export async function updateFest(_: ActionState, fd: FormData): Promise<ActionSt
           select distinct u.email::text as email from tickets t join users u on u.id = t.user_id
           where t.fest_id = ${fest.id} and t.status <> 'void'`).map((h) => h.email)
       : [];
-    const toReview = holders.length > 0 && nameChanged && cur.status === 'live';
+    const clearApproval = nameChanged && approvalRequired() && cur.status !== 'cancelled' && renameClearsApproval(cur.approved, holders.length);
+    const toReview = clearApproval && cur.status === 'live';
+    // Already waiting for a re-check (renamed earlier, not approved since): renaming again only updates the note
+    const recheck = nameChanged && isRenameNote(cur.review_note);
+    const review: RenameReview = toReview ? 'now' : (clearApproval || recheck) && cur.status !== 'review' ? 'next' : null;
     if (holders.length && datesChanged) {
       const lost = await tx<{ name: string; d: string }[]>`
         select tt.name, d::text as d from ticket_types tt, unnest(tt.lunch_days) d
@@ -146,16 +154,20 @@ export async function updateFest(_: ActionState, fd: FormData): Promise<ActionSt
         return { error: `Lunch on ${days} is already sold (${[...new Set(lost.map((l) => l.name))].join(', ')}) and would fall outside the new dates. Keep ${lost.length > 1 ? 'those days' : 'that day'} in the fest, or refund those tickets first.` } as const;
       }
     }
-    if (holders.length && fd.get('confirm_notice') !== 'on') {
-      return { error: `${toReview ? 'This sends the fest back to THE FEST for review (ticket sales pause until it is approved) and emails' : 'This emails'} ${holders.length} ticket holder${holders.length === 1 ? '' : 's'} about the change. Tick “I understand” and save again.` } as const;
+    // Ticket holders get emailed, or a live fest pauses sales: the organizer must say they understand. The reply carries
+    // what to warn about, so the form can show the tick even if the first ticket sold while they were editing.
+    if ((holders.length || toReview) && fd.get('confirm_notice') !== 'on') {
+      return { error: `${changeNotice({ holders: holders.length, review })} Tick “I understand” and save again.`, confirm: { holders: holders.length, review } } as const;
     }
     await tx`update fests set name = ${d.name}, college = ${d.college}, city = ${d.city}, venue = ${venue},
               category = ${d.category}, starts_on = ${d.starts_on}, ends_on = ${d.ends_on}, description = ${d.description ?? ''},
               emoji = ${d.emoji}, accent = ${d.accent}, capacity = ${cap.value}
             where id = ${fest.id}`;
-    if (toReview) {
-      await tx`update fests set status = 'review', approved_at = null,
-                 review_note = ${`Renamed from “${cur.name}” to “${d.name}” after tickets were sold — please check again.`.slice(0, 300)}
+    // Renamed again while still waiting for the admin: the note keeps the original name (it is never wiped before the admin sees it)
+    if (clearApproval || recheck) {
+      await tx`update fests set approved_at = null, approved_by = null,
+                 status = case when status = 'live' then 'review'::fest_status else status end,
+                 review_note = ${renameNote(cur.name, d.name, holders.length, recheck ? cur.review_note : null)}
                where id = ${fest.id}`;
     }
     const changes = [
@@ -163,9 +175,9 @@ export async function updateFest(_: ActionState, fd: FormData): Promise<ActionSt
       datesChanged && `Dates: ${dateRange(cur.starts_on, cur.ends_on)} → ${dateRange(d.starts_on, d.ends_on)}`,
       venueChanged && `Venue: ${cur.venue || 'not set'} → ${venue || 'not set'}`,
     ].filter(Boolean) as string[];
-    return { holders, changes, toReview, oldName: cur.name, slug: cur.slug } as const;
+    return { holders, changes, review, oldName: cur.name, slug: cur.slug } as const;
   });
-  if ('error' in r) return { error: r.error };
+  if ('error' in r) return { error: r.error, ...('confirm' in r ? { confirm: r.confirm } : {}) };
 
   if (r.holders.length) {
     const subject = `${d.name}: fest details have changed`;
@@ -180,12 +192,17 @@ export async function updateFest(_: ActionState, fd: FormData): Promise<ActionSt
       '— THE FEST',
     ].join('\n');
     await afterResponse('fest change emails', async () => {
-      for (const email of r.holders) await sendEmail(email, subject, body);
+      // One failed send must not stop the rest of the list
+      for (const email of r.holders) {
+        try { await sendEmail(email, subject, body); } catch (e) { console.error('fest change email failed', email, e); }
+      }
     });
   }
   refresh(fest.id);
   revalidatePath(`/fests/${r.slug}`);
-  if (r.toReview) return { ok: true, message: `Saved. The new name goes to THE FEST for a quick check — ticket sales pause until it’s approved. ${r.holders.length} ticket holder(s) are being emailed.` };
+  const mailed = r.holders.length ? ` ${r.holders.length} ticket holder(s) are being emailed.` : '';
+  if (r.review === 'now') return { ok: true, message: `Saved. The new name goes to THE FEST for a quick check — ticket sales pause until it’s approved.${mailed}` };
+  if (r.review === 'next') return { ok: true, message: `Saved. The new name needs a quick check by THE FEST — when you publish, the fest goes to admin review first.${mailed}` };
   return { ok: true, message: r.holders.length ? `Saved. ${r.holders.length} ticket holder(s) are being emailed about the change.` : 'Saved.' };
 }
 
@@ -199,10 +216,14 @@ export async function setFestStatus(fd: FormData) {
   if (status === 'live') {
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active`;
     if (!n) return; // UI prevents this; nothing to sell
-    // New fests are checked by THE FEST before tickets go on sale (stops fake fests taking students' money)
-    if (!cur.approved_at && process.env.REQUIRE_FEST_APPROVAL !== 'false') next = 'review';
+    // New fests — and fests renamed since THE FEST approved them (updateFest clears approved_at) — are checked by
+    // THE FEST before tickets go on sale. Publish, Submit and Reopen all come through here.
+    if (!cur.approved_at && approvalRequired()) next = 'review';
   }
-  await sql`update fests set status = ${next}::fest_status, review_note = case when ${next} = 'review' then null else review_note end where id = ${fest.id}`;
+  // Going to review clears an old "sent back" note, but never a rename note: the admin must see what the fest was called
+  await sql`update fests set status = ${next}::fest_status,
+              review_note = case when ${next} = 'review' and coalesce(review_note, '') not like ${'Renamed from “%'} then null else review_note end
+            where id = ${fest.id}`;
   refresh(fest.id);
 }
 

@@ -7,6 +7,7 @@ import '@fontsource/dm-sans/500.css';
 import '@fontsource/dm-sans/600.css';
 import './globals.css';
 import { SwRegister } from '@/components/SwRegister';
+import { HydrationGate } from '@/components/HydrationGate';
 
 const site = process.env.NEXT_PUBLIC_SITE_URL || 'https://thefest.in';
 
@@ -38,11 +39,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en-IN">
-      <body>
-        {children}
-        <SwRegister />
-      </body>
-    </html>
+    <HydrationGate>
+      <html lang="en-IN">
+        <body>
+          {children}
+          <SwRegister />
+        </body>
+      </html>
+    </HydrationGate>
   );
 }

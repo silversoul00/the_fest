@@ -1,28 +1,30 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActionForm, Submit } from '@/components/forms';
 import type { ActionState, Fest } from '@/lib/types';
 
-import type { FestFormFields } from '@/lib/fest-form';
+import { changeNotice, type FestFormFields, type RenameReview } from '@/lib/fest-form';
 
 const EMOJIS = ['🎉', '🎆', '🎵', '🎨', '🚀', '💡', '⚽', '📈', '🎭', '🎤', '🌿', '🔥'];
 const ACCENTS = ['#FFE034', '#FF5C1A', '#00E5A0', '#38BDF8', '#FF2D55', '#B794F6'];
 
-export function FestForm({ action, fest, create, holders = 0, live = false }: {
+export function FestForm({ action, fest, create, holders = 0, rename = null }: {
   action: (s: ActionState, fd: FormData) => Promise<ActionState>;
   /** Only the editable fields — never pass a whole fest row to this client component (it would ship every column to the browser). */
   fest?: FestFormFields;
   create?: boolean;
   /** People holding a ticket — they are emailed when the name, dates or venue change. */
   holders?: number;
-  /** Fest is live: renaming it (with tickets sold) sends it back to THE FEST for review. */
-  live?: boolean;
+  /** What renaming does: 'now' = the live fest goes back to admin review; 'next' = the next Publish/Reopen goes to review. */
+  rename?: RenameReview;
 }) {
   const [emoji, setEmoji] = useState(fest?.emoji ?? '🎉');
   const [accent, setAccent] = useState(fest?.accent ?? '#FFE034');
   const [changed, setChanged] = useState<{ name: boolean; other: boolean }>({ name: false, other: false });
+  // The server's own count, when it asks for the tick (e.g. the first ticket sold while this page was open)
+  const [asked, setAsked] = useState<NonNullable<ActionState>['confirm'] | null>(null);
   const watch = (e: React.FormEvent<HTMLDivElement>) => {
-    if (!fest || !holders) return;
+    if (!fest || (!holders && !rename && !asked)) return;
     const form = (e.target as HTMLInputElement).form;
     if (!form) return;
     const v = (k: string) => String(new FormData(form).get(k) ?? '').trim();
@@ -32,11 +34,20 @@ export function FestForm({ action, fest, create, holders = 0, live = false }: {
     });
   };
   // After a save the page refreshes with the new values: nothing is "changed" any more
-  useEffect(() => setChanged({ name: false, other: false }), [fest?.name, fest?.starts_on, fest?.ends_on, fest?.venue]);
-  const notice = !!fest && holders > 0 && (changed.name || changed.other);
+  useEffect(() => { setChanged({ name: false, other: false }); setAsked(null); }, [fest?.name, fest?.starts_on, fest?.ends_on, fest?.venue, holders, rename]);
+  const run = useCallback(async (st: ActionState, fd: FormData) => {
+    const res = await action(st, fd);
+    setAsked(res?.confirm ?? null);
+    return res;
+  }, [action]);
+  const review: RenameReview = changed.name ? rename : null;
+  const local = !!fest && ((holders > 0 && (changed.name || changed.other)) || !!review);
+  const notice = asked ?? (local ? { holders, review } : null);
+  // A tick is needed when holders are emailed or a live fest pauses sales; 'next' with nobody to email is only a heads-up
+  const needsTick = !!notice && (notice.holders > 0 || notice.review === 'now');
 
   return (
-    <ActionForm action={action}>
+    <ActionForm action={fest ? run : action}>
       {fest && <input type="hidden" name="festId" value={fest.id} />}
       <input type="hidden" name="emoji" value={emoji} />
       <input type="hidden" name="accent" value={accent} />
@@ -114,11 +125,8 @@ export function FestForm({ action, fest, create, holders = 0, live = false }: {
 
       {notice && (
         <div className="alert info stack g8" role="status" data-testid="change-notice">
-          <span>
-            {changed.name && live ? 'This sends the fest back to admin review (ticket sales pause until THE FEST approves it) and emails ' : 'This emails '}
-            {holders} ticket holder{holders === 1 ? '' : 's'} what changed.
-          </span>
-          <label className="check"><input type="checkbox" name="confirm_notice" /> I understand</label>
+          <span>{changeNotice(notice)}</span>
+          {needsTick && <label className="check"><input type="checkbox" name="confirm_notice" /> I understand</label>}
         </div>
       )}
       <Submit pendingText={create ? 'Creating…' : 'Saving…'}>{create ? 'Create fest →' : 'Save changes'}</Submit>

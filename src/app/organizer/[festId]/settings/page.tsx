@@ -1,7 +1,7 @@
 import { requireUser } from '@/lib/auth';
 import { getMembers, getOwnFest } from '@/lib/queries';
 import { FestForm } from '../../FestForm';
-import { festFormFields } from '@/lib/fest-form';
+import { festFormFields, isRenameNote, renameReviewFor } from '@/lib/fest-form';
 import { addMember, setAllowTransfers, cancelFestAction, removeMember, setFestStatus, updateFest } from '../../actions';
 import { ActionForm, Submit } from '@/components/forms';
 import { siteUrlOrNull } from '@/lib/env';
@@ -39,6 +39,9 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
             {(fest.status === 'live' || fest.status === 'draft') && <StatusBtn to="ended" label="End fest" cls="danger" />}
           </div>
         </div>
+        {isRenameNote(fest.review_note) && (fest.status === 'draft' || fest.status === 'ended') && (
+          <p className="xs c-orange wrap-anywhere" data-testid="rename-note">{fest.review_note} {fest.status === 'ended' ? 'Reopen' : 'Publish'} sends the fest to THE FEST for a quick check first.</p>
+        )}
         <div className="divider" style={{ margin: 0 }} />
         <div className="row between wrap-row g8">
           <div>
@@ -59,7 +62,7 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
 
       <div className="card">
         <div className="h3 mb16">Fest details</div>
-        <FestForm action={updateFest} fest={festFormFields(fest)} holders={holders} live={fest.status === 'live'} />
+        <FestForm action={updateFest} fest={festFormFields(fest)} holders={holders} rename={renameReviewFor(fest, holders)} />
       </div>
       <div className="card stack g12" id="team">
         <div className="h3">Co-organizers</div>

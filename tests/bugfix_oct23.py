@@ -43,10 +43,10 @@ D = lambda n: q(f"select ((now() at time zone 'Asia/Kolkata')::date + {n})::text
 
 def mk_fest(slug, name, s, e, venue='Hall A', status='live', upi=False):
     return q(f"""insert into fests (slug, organizer_id, name, college, city, venue, category, starts_on, ends_on, status, approved_at, upi_enabled, upi_vpa)
-                 values ('{slug}', '{ORG}', '{name}', 'Bug College', 'Bengaluru', '{venue}', 'cultural', current_date + {s}, current_date + {e}, '{status}',
+                 values ('{slug}', '{ORG}', '{name}', 'Bug College', 'Bengaluru', '{venue}', 'cultural', (now() at time zone 'Asia/Kolkata')::date + {s}, (now() at time zone 'Asia/Kolkata')::date + {e}, '{status}',
                          {'now()' if status == 'live' else 'null'}, {str(upi).lower()}, {"'bugfest@icici'" if upi else 'null'}) returning id""").split('\n')[0]
 def mk_type(fid, name='Day Pass', lunch=None, sold=0):
-    days = f"array[current_date + {lunch}]::date[]" if lunch is not None else "'{}'::date[]"
+    days = f"array[(now() at time zone 'Asia/Kolkata')::date + {lunch}]::date[]" if lunch is not None else "'{}'::date[]"
     return q(f"insert into ticket_types (fest_id, name, price_paise, quota, sold, lunch_days) values ('{fid}', '{name}', 10000, 100, {sold}, {days}) returning id").split('\n')[0]
 def mk_ticket(fid, tt, user=None, code='TF-BUG1-0001'):
     user = user or STU
@@ -211,13 +211,27 @@ async def main():
         check('M4 admin sees the renamed fest waiting with the note', 'Renamed from “Bug Fest” to “Bug Fest Renamed”' in await body(adm))
         await org.goto(f'{B}/organizer/{m4}')
         check('M4 organizer dashboard shows why it is waiting', 'Renamed from' in await body(org))
+        # Zero tickets sold: follows the one-line switch RENAME_REVIEW_WITHOUT_TICKETS in src/lib/fest-form.ts (Harshith's call)
+        strict = 'RENAME_REVIEW_WITHOUT_TICKETS = true' in open(os.path.join(os.path.dirname(__file__), '..', 'src', 'lib', 'fest-form.ts')).read()
         await org.goto(f'{B}/organizer/{empty}/settings')
+        await org.fill('input[name=venue]', 'Hall Z')
+        n_venue = await org.locator('[data-testid=change-notice]').count()
+        await org.fill('input[name=venue]', 'Hall A')
         await org.fill('input[name=name]', 'Empty Bug Fest Two')
         n0 = await org.locator('[data-testid=change-notice]').count()
+        nt0 = await org.locator('[data-testid=change-notice]').inner_text() if n0 else ''
+        if strict and await org.locator('input[name=confirm_notice]').count(): await org.check('input[name=confirm_notice]')
         await org.click('button:has-text("Save changes")')
-        ok = await alert(org, 'Saved.')
-        check('M4 no tickets sold: rename saves as before (no warning, stays live, no email)', n0 == 0 and ok
-              and q(f"select status from fests where id='{empty}'") == 'live' and q("select count(*) from email_outbox where subject like 'Empty Bug Fest%'") == '0')
+        no_mail = q("select count(*) from email_outbox where subject like 'Empty Bug Fest%'") == '0'
+        if strict:
+            ok = await alert(org, 'quick check')
+            row = q(f"select status || '|' || (approved_at is null)::text || '|' || coalesce(review_note, '') from fests where id='{empty}'")
+            check('M4 no tickets sold (strict rule on): rename of an approved live fest warns, goes to review with a note, no email; a venue change alone says nothing',
+                  n_venue == 0 and n0 == 1 and 'admin review' in nt0 and ok and row.startswith('review|true|Renamed from') and no_mail, (nt0, row))
+        else:
+            ok = await alert(org, 'Saved.')
+            check('M4 no tickets sold: rename saves as before (no warning, stays live, no email)', n0 == 0 and ok
+                  and q(f"select status from fests where id='{empty}'") == 'live' and no_mail)
 
         # ── L4 past dates ──
         await org.goto(B + '/organizer/new')

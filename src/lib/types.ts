@@ -111,4 +111,8 @@ export interface Staff {
   checked_in_at: Date | null;
 }
 
-export type ActionState = { ok?: boolean; error?: string; message?: string } | null;
+export type ActionState = {
+  ok?: boolean; error?: string; message?: string;
+  /** The server wants the "I understand" tick (fest details changed after tickets were sold, or a rename needs review). */
+  confirm?: { holders: number; review: 'now' | 'next' | null };
+} | null;

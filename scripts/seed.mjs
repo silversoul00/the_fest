@@ -23,8 +23,9 @@ if (!isLocalDb(process.env.DATABASE_URL) && !process.argv.includes('--allow-remo
 const sql = postgres(process.env.DATABASE_URL, { prepare: false, max: 1, onnotice: () => {}, ssl: /@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL ?? '') ? false : 'require' });
 const reset = process.argv.includes('--reset');
 
+// Days are IST days, like the app (between 6:30 PM and midnight UTC, India is already on the next date)
 const day = (offset) => {
-  const d = new Date(Date.now() + offset * 864e5);
+  const d = new Date(Date.now() + 5.5 * 3600e3 + offset * 864e5);
   return d.toISOString().slice(0, 10);
 };
 const at = (dayOffset, hh, mm = 0) => {

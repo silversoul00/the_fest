@@ -10,6 +10,7 @@ import { ago, dateRange, dayLabel, time } from '@/lib/format';
 import { activeGateway, feeConfig } from '@/lib/payments';
 import { catLabel, FestStatus } from '@/components/ui';
 import { BuyTickets } from './BuyTickets';
+import { isRenameNote } from '@/lib/fest-form';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const f = await getFestBySlug((await params).slug);
@@ -21,10 +22,13 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const fest = await getFestBySlug(slug);
   const user = await getUser();
-  // Drafts are visible only to their organizer (preview)
+  // Drafts and new fests waiting for approval are visible only to their organizer (preview) and THE FEST's admins.
+  // A fest renamed after approval stays public while THE FEST re-checks it (Harshith, Oct 24): sales are paused, but
+  // ticket holders still see dates, schedule and announcements.
   const runsIt = !!user && !!fest && (fest.organizer_id === user.id
     || (user.verified && (await sql`select 1 from fest_members where fest_id = ${fest.id} and email = ${user.email}`).length > 0));
-  if (!fest || ((fest.status === 'draft' || fest.status === 'review') && !runsIt && !user?.is_admin)) notFound();
+  const renameCheck = !!fest && fest.status === 'review' && isRenameNote(fest.review_note);
+  if (!fest || ((fest.status === 'draft' || (fest.status === 'review' && !renameCheck)) && !runsIt && !user?.is_admin)) notFound();
 
   const [types, schedule, news] = await Promise.all([getTicketTypes(fest.id, 'entry'), getSchedule(fest.id), getAnnouncements(fest.id, 5)]);
 
@@ -47,8 +51,13 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
       <div className="wrap" style={{ marginTop: -36, position: 'relative', zIndex: 2 }}>
         {isOwner && (
           <div className="alert info mb16 row between g8 wrap-row">
-            <span>You&apos;re viewing your fest{fest.status === 'draft' ? ' (draft — only you can see it)' : fest.status === 'review' ? ' (waiting for THE FEST approval — not public yet)' : ''}.</span>
+            <span>You&apos;re viewing your fest{fest.status === 'draft' ? ' (draft — only you can see it)' : fest.status === 'review' ? (renameCheck ? ' (THE FEST is checking the new name — the page stays up, ticket sales are paused)' : ' (waiting for THE FEST approval — not public yet)') : ''}.</span>
             <Link href={`/organizer/${fest.id}`} className="accent">Back to dashboard →</Link>
+          </div>
+        )}
+        {renameCheck && (
+          <div className="alert info mb16" role="status" data-testid="under-review">
+            <b>Under review — ticket sales paused.</b> The organizers changed this fest&apos;s details and THE FEST is checking them. Tickets already bought stay valid and work at the gate.
           </div>
         )}
         <div className="row g8 wrap-row">
@@ -113,7 +122,7 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
           <aside className="card" style={{ position: 'sticky', top: 76 }} id="tickets">
             <h2 className="h3 mb16">Tickets</h2>
             {!canBuy ? (
-              <p className="small muted">{fest.status === 'ended' ? 'This fest has ended.' : fest.status === 'cancelled' ? `This fest was cancelled${fest.cancelled_reason ? `: ${fest.cancelled_reason}` : ''}. Everyone who bought a ticket is refunded.` : 'Tickets are not on sale yet.'}</p>
+              <p className="small muted">{fest.status === 'ended' ? 'This fest has ended.' : fest.status === 'cancelled' ? `This fest was cancelled${fest.cancelled_reason ? `: ${fest.cancelled_reason}` : ''}. Everyone who bought a ticket is refunded.` : renameCheck ? 'Ticket sales are paused while THE FEST checks this fest. They reopen once it’s approved.' : 'Tickets are not on sale yet.'}</p>
             ) : (
               <BuyTickets
                 festSlug={fest.slug}

@@ -14,25 +14,17 @@ export default async function Sales({ params, searchParams }: { params: Promise<
   const fest = await getOwnFest((await params).festId, user);
   const { q = '', page: rawPage } = await searchParams;
   const like = q.trim() ? `%${q.trim()}%` : null;
-  const page = Math.min(1000, Math.max(1, Math.floor(Number(rawPage) || 1)));
+  const asked = Math.min(1000, Math.max(1, Math.floor(Number(rawPage) || 1)));
   const match = sql`o.fest_id = ${fest.id} and o.status in ('paid', 'refunded')
         ${like ? sql`and (u.name ilike ${like} or u.email ilike ${like} or u.college ilike ${like})` : sql``}`;
 
-  const [byType, orders, toSend, [{ total }]] = await Promise.all([
+  const [byType, toSend, [{ total }]] = await Promise.all([
     sql<{ name: string; qty: number; gross: number; fees: number }[]>`
       select tt.name, (case when tt.kind = 'addon' then (select count(*) from orders a where a.ticket_type_id = tt.id and a.status = 'paid')
                             else (select count(*) from tickets t where t.ticket_type_id = tt.id and t.status <> 'void') end)::int qty,
              coalesce(sum(o.amount_paise - o.refunded_paise), 0)::int gross, coalesce(sum(o.platform_fee_paise + o.gateway_fee_paise), 0)::int fees
       from ticket_types tt left join orders o on o.ticket_type_id = tt.id and o.status in ('paid', 'refunded')
       where tt.fest_id = ${fest.id} group by tt.id, tt.name, tt.sort order by tt.sort`,
-    sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string }[]>`
-      select o.id, o.paid_at as created_at, o.qty, o.amount_paise, o.platform_fee_paise, o.provider, o.status, o.refunded_paise, o.refund_status, o.utr,
-             case when o.addon_for is not null then (o.status = 'paid')::int
-                  else (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int end as unused,
-             u.name, u.email::text, u.college, tt.name as type
-      from orders o join users u on u.id = o.user_id join ticket_types tt on tt.id = o.ticket_type_id
-      where ${match}
-      order by o.paid_at desc, o.id limit ${PER_PAGE} offset ${(page - 1) * PER_PAGE}`,
     // Bank-UPI money to send back: refunds, and payments that arrived too late to become tickets
     sql<{ id: string; name: string; email: string; utr: string | null; refunded_paise: number }[]>`
       select o.id, u.name, u.email::text, o.utr, o.refunded_paise
@@ -41,6 +33,16 @@ export default async function Sales({ params, searchParams }: { params: Promise<
     sql<{ total: number }[]>`select count(*)::int as total from orders o join users u on u.id = o.user_id where ${match}`,
   ]);
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+  // A page number past the end (an old link, a typed URL) shows the last real page
+  const page = Math.min(asked, pages);
+  const orders = await sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string }[]>`
+      select o.id, o.paid_at as created_at, o.qty, o.amount_paise, o.platform_fee_paise, o.provider, o.status, o.refunded_paise, o.refund_status, o.utr,
+             case when o.addon_for is not null then (o.status = 'paid')::int
+                  else (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int end as unused,
+             u.name, u.email::text, u.college, tt.name as type
+      from orders o join users u on u.id = o.user_id join ticket_types tt on tt.id = o.ticket_type_id
+      where ${match}
+      order by o.paid_at desc, o.id limit ${PER_PAGE} offset ${(page - 1) * PER_PAGE}`;
   const pageHref = (n: number) => `/organizer/${fest.id}/sales?${new URLSearchParams({ ...(q ? { q } : {}), ...(n > 1 ? { page: String(n) } : {}) })}`;
 
   const totals = byType.reduce((a, t) => ({ qty: a.qty + t.qty, gross: a.gross + t.gross, fees: a.fees + t.fees }), { qty: 0, gross: 0, fees: 0 });
