@@ -1,5 +1,5 @@
-import { requireUser } from '@/lib/auth';
-import { getOwnFest, getTicketTypes } from '@/lib/queries';
+import { pageAccess } from '@/lib/fest-access';
+import { getTicketTypes } from '@/lib/queries';
 import { num, rupees } from '@/lib/format';
 import { feeConfig } from '@/lib/payments';
 import { describeFee } from '@/lib/pricing';
@@ -31,8 +31,7 @@ function PerkFields({ days, t }: { days: string[]; t?: { kind: string; lunch_day
 }
 
 export default async function TicketTypes({ params }: { params: Promise<{ festId: string }> }) {
-  const user = await requireUser('organizer');
-  const fest = await getOwnFest((await params).festId, user);
+  const { fest } = await pageAccess((await params).festId, 'fest');
   const types = await getTicketTypes(fest.id);
   const cfg = feeConfig();
   const days = festDays(fest.starts_on, fest.ends_on);

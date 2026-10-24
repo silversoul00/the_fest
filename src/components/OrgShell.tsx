@@ -1,28 +1,18 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { TABS as ALL_TABS } from '@/lib/roles';
 
 export type OrgFestLink = { id: string; name: string };
 
-const TABS = [
-  { seg: '', icon: '⚡', label: 'Overview' },
-  { seg: '/tickets', icon: '🎟️', label: 'Tickets' },
-  { seg: '/sales', icon: '💰', label: 'Sales' },
-  { seg: '/analytics', icon: '📊', label: 'Analytics' },
-  { seg: '/payments', icon: '🏦', label: 'Payments' },
-  { seg: '/schedule', icon: '📅', label: 'Schedule' },
-  { seg: '/volunteers', icon: '👥', label: 'Volunteers' },
-  { seg: '/announcements', icon: '📢', label: 'Announce' },
-  { seg: '/sponsors', icon: '🏷️', label: 'Sponsors' },
-  { seg: '/settings', icon: '⚙️', label: 'Settings' },
-];
-
-export function OrgShell({ festId, festName, slug, status, fests, userName, isAdmin, logoutAction, badges = {}, children }: {
-  badges?: Record<string, number>;
+export function OrgShell({ festId, festName, slug, status, fests, userName, youAre, tabs, canCreate, isAdmin, logoutAction, badges = {}, children }: {
+  badges?: Record<string, number>; youAre: string; tabs: string[]; canCreate: boolean;
   festId: string; festName: string; slug: string; status: string; fests: OrgFestLink[]; userName: string; isAdmin?: boolean;
   logoutAction: () => Promise<void>; children: React.ReactNode;
 }) {
   const path = usePathname();
+  // Only the tabs this person's role(s) may open (the server checks each page too)
+  const TABS = ALL_TABS.filter((t) => tabs.includes(t.seg));
   const base = `/organizer/${festId}`;
   const cur = (seg: string) => (path === base + seg ? 'page' : undefined);
 
@@ -38,6 +28,7 @@ export function OrgShell({ festId, festName, slug, status, fests, userName, isAd
             <Link href={`/fests/${slug}`} className="xs accent">View page ↗</Link>
           </div>
         </div>
+        <div className="xs muted" style={{ padding: '0 12px 8px' }} data-you-are>You: {youAre}</div>
         <div className="side-sep">Manage</div>
         {TABS.map((t) => (
           <Link key={t.seg} href={base + t.seg} className="side-link" aria-current={cur(t.seg)}>
@@ -52,7 +43,7 @@ export function OrgShell({ festId, festName, slug, status, fests, userName, isAd
             ))}
           </>
         )}
-        <Link href="/organizer/new" className="side-link"><span className="i">＋</span>New fest</Link>
+        {canCreate && <Link href="/organizer/new" className="side-link"><span className="i">＋</span>New fest</Link>}
         <Link href="/scan/login" className="side-link"><span className="i">📷</span>Gate scanner</Link>
         {isAdmin && <Link href="/admin" className="side-link"><span className="i">🛡️</span>THE FEST admin</Link>}
         <div className="grow" />
@@ -67,7 +58,7 @@ export function OrgShell({ festId, festName, slug, status, fests, userName, isAd
         <header className="topbar mobile-only">
           <div className="wrap topbar-in">
             <Link href="/organizer" className="logo" style={{ fontSize: 20 }}>THE FEST</Link>
-            <span className="small truncate" style={{ maxWidth: '50%' }}>{festName}</span>
+            <span className="small truncate" style={{ maxWidth: '55%', textAlign: 'right' }}>{festName}<br /><span className="xs muted">You: {youAre}</span></span>
           </div>
         </header>
         <nav className="tabstrip" aria-label="Fest sections">

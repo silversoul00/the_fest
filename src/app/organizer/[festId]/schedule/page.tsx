@@ -1,5 +1,5 @@
-import { requireUser } from '@/lib/auth';
-import { getOwnFest, getSchedule } from '@/lib/queries';
+import { pageAccess } from '@/lib/fest-access';
+import { getSchedule } from '@/lib/queries';
 import { dayLabel, time } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty } from '@/components/ui';
@@ -7,8 +7,8 @@ import type { ScheduleEvent } from '@/lib/types';
 import { addEvent, deleteEvent } from '../../actions';
 
 export default async function Schedule({ params }: { params: Promise<{ festId: string }> }) {
-  const user = await requireUser('organizer');
-  const fest = await getOwnFest((await params).festId, user);
+  const { fest, access } = await pageAccess((await params).festId, 'schedule_view');
+  const canEdit = access.perms.has('schedule');
   const events = await getSchedule(fest.id);
   const days = new Map<string, ScheduleEvent[]>();
   for (const e of events) days.set(dayLabel(e.starts_at), [...(days.get(dayLabel(e.starts_at)) ?? []), e]);
@@ -23,7 +23,7 @@ export default async function Schedule({ params }: { params: Promise<{ festId: s
     <div className="stack g16">
       <h1 className="h2">Schedule</h1>
 
-      <div className="card">
+      {canEdit && <div className="card">
         <div className="h3 mb16">Add an event</div>
         <ActionForm action={addEvent} resetOnSuccess>
           <input type="hidden" name="festId" value={fest.id} />
@@ -40,11 +40,11 @@ export default async function Schedule({ params }: { params: Promise<{ festId: s
           </div>
           <Submit className="btn">+ Add to schedule</Submit>
         </ActionForm>
-      </div>
+      </div>}
 
       {clashes.size > 0 && <div className="alert error">⚠ {clashes.size} events overlap at the same venue — highlighted below.</div>}
 
-      {events.length === 0 ? <Empty icon="📅" title="No events yet">Add your first event above — students see it on your fest page.</Empty> : (
+      {events.length === 0 ? <Empty icon="📅" title="No events yet">{canEdit ? 'Add your first event above — students see it on your fest page.' : 'The organizers haven’t added events yet.'}</Empty> : (
         [...days].map(([d, evs]) => (
           <div key={d}>
             <div className="label mb8">{d}</div>
@@ -53,11 +53,11 @@ export default async function Schedule({ params }: { params: Promise<{ festId: s
                 <div key={e.id} className="li" style={clashes.has(e.id) ? { background: 'rgba(255,45,85,.07)' } : undefined}>
                   <span className="mono xs c-yellow" style={{ width: 120, flexShrink: 0 }}>{time(e.starts_at)} – {time(e.ends_at)}</span>
                   <div className="grow"><div>{e.title}</div><div className="xs muted">{e.venue}{clashes.has(e.id) && <span className="c-red"> · clash</span>}</div></div>
-                  <form action={deleteEvent}>
+                  {canEdit && <form action={deleteEvent}>
                     <input type="hidden" name="festId" value={fest.id} />
                     <input type="hidden" name="id" value={e.id} />
                     <button className="btn text xs" style={{ color: 'var(--red)' }} aria-label={`Delete ${e.title}`}>Remove</button>
-                  </form>
+                  </form>}
                 </div>
               ))}
             </div>

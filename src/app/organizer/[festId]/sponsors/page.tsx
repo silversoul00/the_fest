@@ -1,5 +1,5 @@
-import { requireUser } from '@/lib/auth';
-import { getOwnFest, getSponsors } from '@/lib/queries';
+import { pageAccess } from '@/lib/fest-access';
+import { getSponsors } from '@/lib/queries';
 import { num, rupees, graphemes } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty, Stat } from '@/components/ui';
@@ -12,8 +12,7 @@ import { VerifyNotice } from '@/components/VerifyNotice';
 import { ALREADY_SPONSOR, BRAND_CATEGORIES, REQUESTS_MISSING, SEND_NEEDS_LIVE, festRequests, requestsReady, visibleToBrands } from '@/lib/sponsor-requests';
 
 export default async function Sponsors({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ remove?: string; err?: string; removed?: string; to?: string; bcat?: string; bcity?: string }> }) {
-  const user = await requireUser('organizer');
-  const fest = await getOwnFest((await params).festId, user);
+  const { user, fest } = await pageAccess((await params).festId, 'sponsors');
   const sp = await searchParams;
   const sponsors = await getSponsors(fest.id);
   const total = sponsors.reduce((a, s) => a + s.amount_paise, 0);

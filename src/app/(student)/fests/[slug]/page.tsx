@@ -4,7 +4,7 @@ import type { CSSProperties } from 'react';
 import type { Metadata } from 'next';
 import type { ScheduleEvent } from '@/lib/types';
 import { getUser } from '@/lib/auth';
-import { sql } from '@/lib/db';
+import { festAccess } from '@/lib/fest-access';
 import { getAnnouncements, getFestBySlug, getSchedule, getTicketTypes } from '@/lib/queries';
 import { ago, dateRange, dayLabel, time } from '@/lib/format';
 import { activeGateway, feeConfig } from '@/lib/payments';
@@ -25,8 +25,7 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
   // Drafts and new fests waiting for approval are visible only to their organizer (preview) and THE FEST's admins.
   // A fest renamed after approval stays public while THE FEST re-checks it (Harshith, Oct 24): sales are paused, but
   // ticket holders still see dates, schedule and announcements.
-  const runsIt = !!user && !!fest && (fest.organizer_id === user.id
-    || (user.verified && (await sql`select 1 from fest_members where fest_id = ${fest.id} and email = ${user.email}`).length > 0));
+  const runsIt = !!user && !!fest && (fest.organizer_id === user.id || !!(await festAccess(fest.id, user)));
   const renameCheck = !!fest && fest.status === 'review' && isRenameNote(fest.review_note);
   if (!fest || ((fest.status === 'draft' || (fest.status === 'review' && !renameCheck)) && !runsIt && !user?.is_admin)) notFound();
 

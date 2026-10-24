@@ -101,16 +101,6 @@ export interface Sponsor {
   created_at: Date;
 }
 
-export interface Staff {
-  id: string;
-  fest_id: string;
-  email: string;
-  name: string;
-  duty: string;
-  can_scan: boolean;
-  checked_in_at: Date | null;
-}
-
 export type ActionState = {
   ok?: boolean; error?: string; message?: string;
   /** The server wants the "I understand" tick (fest details changed after tickets were sold, or a rename needs review). */

@@ -1,13 +1,12 @@
-import { requireUser } from '@/lib/auth';
-import { getAnnouncements, getOwnFest } from '@/lib/queries';
+import { pageAccess } from '@/lib/fest-access';
+import { getAnnouncements } from '@/lib/queries';
 import { ago } from '@/lib/format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty } from '@/components/ui';
 import { deleteAnnouncement, postAnnouncement } from '../../actions';
 
 export default async function Announcements({ params }: { params: Promise<{ festId: string }> }) {
-  const user = await requireUser('organizer');
-  const fest = await getOwnFest((await params).festId, user);
+  const { fest } = await pageAccess((await params).festId, 'announce');
   const items = await getAnnouncements(fest.id, 50);
 
   return (

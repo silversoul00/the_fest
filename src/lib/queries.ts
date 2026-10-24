@@ -1,7 +1,9 @@
 import 'server-only';
-import { notFound } from 'next/navigation';
 import { sql } from './db';
-import type { Announcement, Fest, ScheduleEvent, Sponsor, Staff, TicketType, User } from './types';
+import type { Announcement, Fest, ScheduleEvent, Sponsor, TicketType, User } from './types';
+import { rolesReady } from './fest-access';
+import { ROLE_COUNTER, isRoleKey, type Counter } from './roles';
+import { todayIST } from './format';
 
 export type FestListItem = Fest & { min_price: number | null; sold: number; quota: number };
 
@@ -26,27 +28,6 @@ export async function getFestBySlug(slug: string) {
   return f ?? null;
 }
 
-/** Organizer-owned fest or 404. */
-/** SQL condition: `user` runs fest `f` — as its owner or as a co-organizer added by email. */
-export const canManage = (user: Pick<User, 'id' | 'email' | 'verified'>, alias = 'f') =>
-  user.verified
-    ? sql`(${sql(alias)}.organizer_id = ${user.id} or exists (select 1 from fest_members m where m.fest_id = ${sql(alias)}.id and m.email = ${user.email}))`
-    : sql`(${sql(alias)}.organizer_id = ${user.id})`;
-
-/** A fest the user runs (owner or co-organizer). `is_owner` gates money and team settings. */
-export async function getOwnFest(festId: string, user: User) {
-  if (!/^[0-9a-f-]{36}$/i.test(festId)) notFound();
-  const [f] = await sql<(Fest & { is_owner: boolean })[]>`
-    select f.*, (f.organizer_id = ${user.id}) as is_owner from fests f where f.id = ${festId} and ${canManage(user)}`;
-  if (!f) notFound();
-  return f;
-}
-
-export const getMembers = (festId: string) =>
-  sql<{ id: string; email: string; created_at: Date; name: string | null }[]>`
-    select m.id, m.email::text, m.created_at, u.name from fest_members m left join users u on u.email = m.email
-    where m.fest_id = ${festId} order by m.created_at`;
-
 /** All ticket types (organizer), or only `kind` ones — the fest page sells 'entry', the ticket page 'addon'. */
 export const getTicketTypes = (festId: string, kind?: TicketType['kind']) =>
   sql<TicketType[]>`select * from ticket_types where fest_id = ${festId} ${kind ? sql`and kind = ${kind}` : sql``} order by sort, price_paise`;
@@ -56,9 +37,6 @@ export const getSchedule = (festId: string) =>
 
 export const getAnnouncements = (festId: string, limit = 20) =>
   sql<Announcement[]>`select * from announcements where fest_id = ${festId} order by created_at desc limit ${limit}`;
-
-export const getStaff = (festId: string) =>
-  sql<Staff[]>`select id, fest_id, email::text, name, duty, can_scan, checked_in_at from fest_staff where fest_id = ${festId} order by duty, name`;
 
 export const getSponsors = (festId: string) =>
   sql<(Sponsor & { visits: number })[]>`
@@ -84,12 +62,47 @@ export async function festStats(festId: string) {
   return s;
 }
 
-/** Can this user scan for this fest? Organizer of the fest, or staff with can_scan. */
-export async function scannableFests(user: User) {
-  return sql<(Fest & { duty: string | null })[]>`
-    select f.*, null::text as duty from fests f where ${canManage(user)} and f.status in ('live', 'review', 'draft')
-    union
-    select f.*, s.duty from fests f join fest_staff s on s.fest_id = f.id
-    where s.email = ${user.email} and ${user.verified} and s.can_scan and f.status in ('live', 'review', 'draft')
-    order by starts_on`;
+export type ScanFest = Fest & {
+  /** Owner or co-organizer: any counter and the organizer's sealed section. */
+  manager: boolean;
+  /** Counters this person works today (volunteers: from their role(s)). */
+  counters: Counter[];
+  /** Has a scanning role at this fest, but only on another day (IST): that day. */
+  shift_day: string | null;
+};
+
+/**
+ * Fests this person may scan for, and how. Owner / co-organizer → manager. Gate volunteer and Desk volunteer → gate,
+ * Lunch volunteer → lunch, Stay volunteer → stay (several roles → several counters). Roles count only with a confirmed
+ * email; a day-limited role only on that IST day (otherwise `shift_day` says when).
+ */
+export async function scannableFests(user: User): Promise<ScanFest[]> {
+  const withRoles = await rolesReady();
+  const rows = await sql<(Fest & { r_role: string | null; r_day: string | null; r_scan: boolean | null; is_owner: boolean })[]>`
+    select f.*, (f.organizer_id = ${user.id}) as is_owner, r.role as r_role, r.scope_day::text as r_day, r.can_scan as r_scan
+    from fests f
+    ${withRoles ? sql`left join fest_roles r on r.fest_id = f.id and r.email = ${user.email} and ${user.verified}` : sql`left join (select null::text as role, null::date as scope_day, null::boolean as can_scan) r on false`}
+    where f.status in ('live', 'review', 'draft')
+      and (f.organizer_id = ${user.id} ${withRoles ? sql`or r.id is not null` : sql``})
+    order by f.starts_on, f.id`;
+  const today = todayIST();
+  const out = new Map<string, ScanFest>();
+  for (const row of rows) {
+    const { r_role, r_day, r_scan, is_owner, ...f } = row;
+    const cur = out.get(f.id) ?? { ...(f as Fest), manager: is_owner, counters: [], shift_day: null };
+    const role = isRoleKey(r_role) ? r_role : null;
+    const todayOk = !r_day || r_day === today;
+    if (role === 'co_organizer' && todayOk) cur.manager = true;
+    const c = role ? ROLE_COUNTER[role] : undefined;
+    if (c && r_scan) {
+      if (todayOk) { if (!cur.counters.includes(c)) cur.counters.push(c); }
+      else if (r_day && r_day > today && (!cur.shift_day || cur.shift_day < today || r_day < cur.shift_day)) cur.shift_day = r_day;
+      else if (r_day && !cur.shift_day) cur.shift_day = r_day;
+    }
+    out.set(f.id, cur);
+  }
+  const order: Counter[] = ['gate', 'lunch', 'stay'];
+  return [...out.values()]
+    .map((f) => ({ ...f, counters: f.manager ? order : order.filter((c) => f.counters.includes(c)) }))
+    .filter((f) => f.manager || f.counters.length || f.shift_day);
 }

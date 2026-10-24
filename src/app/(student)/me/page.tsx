@@ -7,18 +7,21 @@ import { LogoutForm } from './LogoutForm';
 import { leadsReady } from '@/lib/sponsor-leads';
 import { stopSharing } from '../../booth/[code]/actions';
 import { StopSharingForm } from '../../booth/[code]/LeadForms';
+import { myRoles } from '@/lib/team';
+import { MyFestRoles } from '@/components/MyFestRoles';
+import { leaveRole } from '../../organizer/actions';
 
 export const metadata = { title: 'Profile' };
 
-export default async function Me({ searchParams }: { searchParams: Promise<{ stopped?: string }> }) {
+export default async function Me({ searchParams }: { searchParams: Promise<{ stopped?: string; left?: string }> }) {
   const user = await requireUser('student');
-  const { stopped } = await searchParams;
-  const [s] = await sql<{ tickets: number; fests: number; spent: number; staff: number }[]>`
+  const { stopped, left } = await searchParams;
+  const [s] = await sql<{ tickets: number; fests: number; spent: number }[]>`
     select
       (select count(*) from tickets where user_id = ${user.id} and status <> 'void')::int as tickets,
       (select count(distinct fest_id) from tickets where user_id = ${user.id} and status = 'used')::int as fests,
-      (select coalesce(sum(amount_paise), 0) from orders where user_id = ${user.id} and status = 'paid')::int as spent,
-      (select count(*) from fest_staff where email = ${user.email})::int as staff`;
+      (select coalesce(sum(amount_paise), 0) from orders where user_id = ${user.id} and status = 'paid')::int as spent`;
+  const roles = await myRoles(user);
   // Brands this student chose to share their contact with (active only)
   const shared = (await leadsReady())
     ? await sql<{ sponsor_id: string; brand: string; fest_name: string; shared_at: Date }[]>`
@@ -43,13 +46,8 @@ export default async function Me({ searchParams }: { searchParams: Promise<{ sto
         <Stat label="Spent" value={rupees(s.spent, { compact: true })} color="var(--orange)" />
       </div>
 
-      {s.staff > 0 && (
-        <a href="/scan/login" className="card link row g12">
-          <span style={{ fontSize: 22 }}>📷</span>
-          <span className="grow"><strong>You&apos;re a volunteer</strong><br /><span className="small muted">Open the gate scanner</span></span>
-          <span className="muted">→</span>
-        </a>
-      )}
+      {left && <div className="alert ok" role="status">You left that role.</div>}
+      <MyFestRoles groups={roles} verified={user.verified} from="me" leaveAction={leaveRole} />
 
       {stopped && <div className="alert ok" role="status">Done — you stopped sharing. The brand is told to delete your details.</div>}
       {shared.length > 0 && (

@@ -97,6 +97,14 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   Judge, Finance lead, Sponsorship lead, Media/PR, Volunteer (Gate/Lunch/Stay), Desk volunteer. Fixed roles in v1 (no
   custom roles); owner and co-organizers can assign, only the owner adds co-organizers; one student may hold several
   roles; optional limit to one event/day; activity log; pending until email confirmed. Comes before Competitions.
+- **Team & Roles — Harshith said "BUILD" (Oct 24, 2026)** for the plan in `docs/team/research/2026-10-24-team-roles.md`.
+  His answers (Oct 24, 2026):
+  1. **Refunds = owner + Finance lead** (this also answers open decision 4: co-organizers do not refund).
+  2. **Desk volunteer** = look up attendees (name / email / ticket code) + gate scanning; **no money**.
+  3. Role holders use their **normal (student) accounts** — no separate organizer account needed (co-organizers too).
+  4. Add the v2.7 tables (`fest_roles`, `fest_activity`) to **both** Supabase databases after the tests pass (the
+     coordinator does it, not the builder).
+  Earlier rules stay (e.g. every rename of an approved fest → admin review).
 - Organizer "Must" list (proposed): Competitions, Digital certificates, Quick setup / copy last year, Volunteer shifts.
   Should: committee budget, vendor marketplace (certificate makers, medal makers, canopy etc.), feedback/polls, crowd view.
 
@@ -122,6 +130,7 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 - Commission setting; Cashfree + Razorpay; zero-fee bank UPI with auto-verification.
 - Admin panel (fest approval, payouts, order search), refunds and fest cancellation.
 - Password reset, email confirmation, ticket transfer, co-organizers, policy pages (drafts).
+- **Team & Roles** (Oct 24, 2026, schema v2.7 — not yet applied to Supabase): fixed roles per fest, Team tab, activity log, "My fest roles" on /me.
 - **Organizer analytics** tab — Harshith chose organizer analytics first, **refreshed when the page opens (not live)**.
 
 ## Sponsor leads (Oct 18, 2026)
@@ -138,7 +147,7 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
 1. Commission: ₹15 flat, or ~5% with ₹8 minimum / ₹30 maximum?
 2. Add `RESEND_API_KEY` and `ADMIN_EMAILS` in Vercel.
 3. Fill business details on the policy pages; lawyer/CA review.
-4. Should co-organizers be allowed to refund? (Currently owner only.)
+4. ~~Should co-organizers be allowed to refund?~~ Answered Oct 24, 2026: refunds = owner + Finance lead (see Organizer plan).
 5. Next analytics piece: sponsor analytics, his own business dashboard, or visitor tracking?
 6. Backups (Oct 17, 2026): GitHub only runs the backup job from the default branch (`main`). Options: (a) add just
    `.github/workflows/db-backup.yml` to `main`, (b) make `full-app` the default branch, (c) Supabase Pro (daily backups).

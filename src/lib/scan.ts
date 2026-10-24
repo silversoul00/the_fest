@@ -4,6 +4,8 @@ import { verifyTicket } from './ticket-crypto';
 import { verifyTf2, type Live } from './qr2.ts';
 import { isTf2Text } from './qr2-format.ts';
 import { time, todayIST } from './format';
+import type { Counter } from './roles';
+export type { Counter };
 
 export type Verdict = {
   result: 'admitted' | 'duplicate' | 'invalid' | 'wrong_fest' | 'void';
@@ -15,15 +17,6 @@ export type Verdict = {
   gate?: string | null;
   live?: Live | null;
 };
-
-/** Which desk a volunteer works: comes from their duty, set by the organizer. */
-export type Counter = 'gate' | 'lunch' | 'stay';
-export function counterFor(duty: string | null | undefined): Counter {
-  const d = (duty ?? '').trim().toLowerCase();
-  if (d.startsWith('lunch')) return 'lunch';
-  if (d.startsWith('stay') || d.startsWith('hostel')) return 'stay';
-  return 'gate';
-}
 
 type Resolved = { ticketId: string } | { verdict: Verdict };
 

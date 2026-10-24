@@ -49,9 +49,9 @@ function feedback(ok: boolean) {
   } catch {}
 }
 
-export function Scanner({ counter, canPick, fests, festId, festName, defaultGate, volunteer, scannerId, initialCounts, lockAction }: {
-  counter: Counter; canPick: boolean;
-  fests: { id: string; name: string; duty: string | null }[]; festId: string; festName: string; defaultGate: string;
+export function Scanner({ counter, counters, fests, festId, festName, defaultGate, volunteer, scannerId, initialCounts, lockAction }: {
+  counter: Counter; counters: Counter[];
+  fests: { id: string; name: string }[]; festId: string; festName: string; defaultGate: string;
   volunteer: string; scannerId: string; initialCounts: Counts; lockAction: () => Promise<void>;
 }) {
   const router = useRouter();
@@ -319,10 +319,10 @@ export function Scanner({ counter, canPick, fests, festId, festName, defaultGate
 
         <div className="row g8" style={{ alignItems: 'center' }}>
           <div className="grow display" style={{ fontSize: 30, color: counter === 'gate' ? 'var(--green)' : 'var(--yellow)' }} data-counter={counter}>{COUNTER_LABEL[counter]}</div>
-          {canPick && (
+          {counters.length > 1 && (
             <select className="select" style={{ minWidth: 150 }} value={counter} aria-label="Counter"
               onChange={(e) => router.replace(`/scan?fest=${festId}&counter=${e.target.value}`)}>
-              {(['gate', 'lunch', 'stay'] as const).map((c) => <option key={c} value={c}>{COUNTER_LABEL[c]}</option>)}
+              {counters.map((c) => <option key={c} value={c}>{COUNTER_LABEL[c]}</option>)}
             </select>
           )}
         </div>

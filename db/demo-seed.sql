@@ -101,17 +101,36 @@ begin
 
   update ticket_types tt set sold = (select count(*) from tickets t where t.ticket_type_id = tt.id);
 
-  -- Gate team
-  insert into fest_staff (fest_id, email, name, duty, can_scan, checked_in_at) values
-    (f_neon, 'volunteer@thefest.in', 'Kiran Volunteer', 'Gate 1', true, now() - interval '5 hours'),
-    (f_neon, 'organizer@thefest.in', 'Riya Kapoor', 'Gate 1', true, now() - interval '5 hours'),
-    (f_neon, 'gate2@seed.thefest.in', 'Manoj Gate', 'Gate 2', true, now() - interval '4 hours'),
-    (f_neon, 'gate3@seed.thefest.in', 'Priya Gate', 'Gate 3', true, now() - interval '4 hours'),
-    (f_neon, 'desk@seed.thefest.in', 'Lakshmi Desk', 'Registration desk', false, null),
-    (f_neon, 'stage@seed.thefest.in', 'Rahul Stage', 'Main stage', false, null),
-    (f_neon, 'lunch@seed.thefest.in', 'Lata Lunch', 'Lunch counter', true, null),
-    (f_neon, 'stay@seed.thefest.in', 'Sunil Stay', 'Stay desk', true, null),
-    (f_hack, 'volunteer@thefest.in', 'Kiran Volunteer', 'Gate 1', true, null);
+  -- Team & Roles (v2.7): gate team plus role holders on normal student accounts
+  insert into fest_roles (fest_id, email, name, role, duty, can_scan, checked_in_at, added_by) values
+    (f_neon, 'volunteer@thefest.in', 'Kiran Volunteer', 'vol_gate', 'Gate 1', true, now() - interval '5 hours', org1),
+    (f_neon, 'organizer@thefest.in', 'Riya Kapoor', 'vol_gate', 'Gate 1', true, now() - interval '5 hours', org1),
+    (f_neon, 'gate2@seed.thefest.in', 'Manoj Gate', 'vol_gate', 'Gate 2', true, now() - interval '4 hours', org1),
+    (f_neon, 'gate3@seed.thefest.in', 'Priya Gate', 'vol_gate', 'Gate 3', true, now() - interval '4 hours', org1),
+    (f_neon, 'desk@seed.thefest.in', 'Lakshmi Desk', 'desk', 'Registration desk', true, null, org1),
+    (f_neon, 'stage@seed.thefest.in', 'Rahul Stage', 'vol_gate', 'Main stage', false, null, org1),
+    (f_neon, 'lunch@seed.thefest.in', 'Lata Lunch', 'vol_lunch', 'Lunch counter', true, null, org1),
+    (f_neon, 'stay@seed.thefest.in', 'Sunil Stay', 'vol_stay', 'Stay desk', true, null, org1),
+    (f_hack, 'volunteer@thefest.in', 'Kiran Volunteer', 'vol_gate', 'Gate 1', true, null, org1);
+  insert into users (email, password_hash, name, role, college, email_verified_at) values
+    ('cohost@seed.thefest.in', pw, 'Chetan Cohost', 'student', colleges[1], now()),
+    ('finance@seed.thefest.in', pw, 'Farah Finance', 'student', colleges[1], now()),
+    ('sponsorlead@seed.thefest.in', pw, 'Sameer Sponsorship', 'student', colleges[1], now()),
+    ('media@seed.thefest.in', pw, 'Meera Media', 'student', colleges[1], now()),
+    ('eventhead@seed.thefest.in', pw, 'Esha Events', 'student', colleges[1], now()),
+    ('judge@seed.thefest.in', pw, 'Jai Judge', 'student', colleges[1], now());
+  insert into fest_roles (fest_id, email, name, role, scope_label, scope_day, added_by) values
+    (f_neon, 'cohost@seed.thefest.in', 'Chetan Cohost', 'co_organizer', null, null, org1),
+    (f_neon, 'finance@seed.thefest.in', 'Farah Finance', 'finance', null, null, org1),
+    (f_neon, 'sponsorlead@seed.thefest.in', 'Sameer Sponsorship', 'sponsorship', null, null, org1),
+    (f_neon, 'media@seed.thefest.in', 'Meera Media', 'media', null, null, org1),
+    (f_neon, 'media@seed.thefest.in', 'Meera Media', 'judge', 'Battle of Bands', null, org1),
+    (f_neon, 'eventhead@seed.thefest.in', 'Esha Events', 'event_head', 'Battle of Bands', null, org1),
+    (f_neon, 'judge@seed.thefest.in', 'Jai Judge', 'judge', 'Fashion Show', d0 + 1, org1),
+    (f_neon, 'newvolunteer@seed.thefest.in', 'Nisha New', 'vol_gate', null, null, org1);   -- pending: no account yet
+  insert into fest_activity (fest_id, actor_id, actor_email, actor_role, action, summary) values
+    (f_neon, org1, 'organizer@thefest.in', 'owner', 'role.add', 'Added Farah Finance as Finance lead'),
+    (f_neon, org1, 'organizer@thefest.in', 'owner', 'role.add', 'Added Meera Media as Media / PR');
 
   -- Check-ins: ~62% of Neon Utsav tickets today 9 AM–6 PM IST; most Goal Rush tickets
   with c as (

@@ -1,6 +1,5 @@
 import Link from 'next/link';
-import { requireUser } from '@/lib/auth';
-import { getOwnFest } from '@/lib/queries';
+import { pageAccess } from '@/lib/fest-access';
 import { festAnalytics } from '@/lib/analytics';
 import { num, rupees, shortDate } from '@/lib/format';
 import { Empty, Stat } from '@/components/ui';
@@ -34,8 +33,7 @@ function Card({ title, sub, children, table }: { title: string; sub?: string; ch
 }
 
 export default async function Analytics({ params }: { params: Promise<{ festId: string }> }) {
-  const user = await requireUser('organizer');
-  const fest = await getOwnFest((await params).festId, user);
+  const { fest } = await pageAccess((await params).festId, 'analytics');
   const a = await festAnalytics(fest.id);
   const t = a.totals;
   const capacity = t.capacity && t.capacity > 0 ? t.capacity : t.quota;

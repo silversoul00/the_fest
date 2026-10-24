@@ -93,7 +93,7 @@ async def main():
     mk = lambda em, nm, role, ver: q(f"insert into users (email, password_hash, name, role, email_verified_at) select '{em}', password_hash, '{nm}', '{role}', {ver} from users where email='sponsor@thefest.in' on conflict (email) do nothing")
     mk('newbrand@seed.thefest.in', 'Nina Nova', 'sponsor', 'now()'); mk('unver@seed.thefest.in', 'Umesh Unverified', 'sponsor', 'null')
     mk('coorg@seed.thefest.in', 'Cora Coorganizer', 'organizer', 'now()')
-    q(f"insert into fest_members (fest_id, email) values ('{neon}', 'coorg@seed.thefest.in'), ('{kalaa}', 'coorg@seed.thefest.in') on conflict do nothing")
+    q(f"insert into fest_roles (fest_id, email, role) values ('{neon}', 'coorg@seed.thefest.in', 'co_organizer'), ('{kalaa}', 'coorg@seed.thefest.in', 'co_organizer') on conflict do nothing")
     mk('unorg@seed.thefest.in', 'Uma Unverified Organizer', 'organizer', 'null'); mk('pitch@seed.thefest.in', 'Priya Pitch', 'sponsor', 'now()')
     unorg = q("select id from users where email='unorg@seed.thefest.in'"); pitch = q("select id from users where email='pitch@seed.thefest.in'")
     q(f"insert into brand_profiles (user_id, brand, category, listed) values ('{pitch}', 'Pitch Perfect', 'tech', true) on conflict do nothing")
@@ -225,7 +225,7 @@ async def main():
                 check(f'6/11. accept posted as {who} is refused', q(f"select status from sponsor_requests where id='{rq}'") == 'sent'
                       and q(f"select count(*) from sponsors where email='newbrand@seed.thefest.in'") == '0')
             r = await stu.goto(f'{B}/sponsor/requests'); check('6. a student is turned away from /sponsor/requests', '/sponsor' not in stu.url)
-            r = await vol.goto(f'{B}/organizer/{neon}/sponsors'); check('11. a volunteer can\'t open the organizer sponsors tab', f'/organizer/{neon}' not in vol.url)
+            r = await vol.goto(f'{B}/organizer/{neon}/sponsors'); check('11. a volunteer can\'t open the organizer sponsors tab', f'/organizer/{neon}/sponsors' not in vol.url and (vol.url.endswith('/no-access') or f'/organizer/{neon}' not in vol.url), vol.url)  # v2.7: team members get "Your role can't open this tab"
 
             # 8. double-click: two accepts at once → one sponsors row, the other "already answered"
             outs = await asyncio.gather(replay(org.request, act), replay(org.request, act))

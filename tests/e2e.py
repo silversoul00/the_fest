@@ -141,7 +141,8 @@ async def main():
         check('login returns to next', st.url.endswith('/fests/test-fest-e2e'), st.url)
         await st.click('button:has-text("Get free ticket")'); await st.wait_for_url('**/tickets?order=*')
         check('free ticket issued instantly', await st.locator('text=You\'re in!').count() == 1)
-        r = await st.goto(f'{B}/organizer/{neon}'); check('student blocked from organizer', '/fests' in st.url, st.url)
+        # v2.7: students may hold fest roles, so a student with no role at this fest gets "not found" (was a redirect to /fests)
+        r = await st.goto(f'{B}/organizer/{neon}'); check('student blocked from organizer', r.status == 404 and 'Your revenue' not in await st.inner_text('body'), (r.status, st.url))
         # fest page shows announcement posted by organizer
         await st.goto(B + '/fests/neon-utsav')
         check('announcement visible to students', await st.locator('text=Free water at Gate 3').count() == 1)

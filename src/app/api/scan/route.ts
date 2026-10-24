@@ -1,10 +1,9 @@
 import { getScanner } from '@/lib/auth';
 import { body, fail, isUuid, json, sameOrigin } from '@/lib/http';
 import { scannableFests } from '@/lib/queries';
-import { checkIn, counterFor, liveOf, perkCounts, redeemPerk, type Counter } from '@/lib/scan';
+import { checkIn, liveOf, perkCounts, redeemPerk, type Counter } from '@/lib/scan';
+import { dateRange } from '@/lib/format';
 import { sql } from '@/lib/db';
-
-const COUNTERS: Counter[] = ['gate', 'lunch', 'stay'];
 
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return fail('Bad origin', 403);
@@ -16,15 +15,13 @@ export async function POST(req: Request) {
   if (!b.payload && !b.code) return fail('Nothing scanned.');
   if ((b.payload?.length ?? 0) > 600 || (b.code?.length ?? 0) > 40) return fail('Not a THE FEST ticket.');
 
-  const rows = (await scannableFests(scanner)).filter((f) => f.id === b.festId);
-  if (!rows.length) return fail('You are not on this fest’s gate team.', 403);
+  const f = (await scannableFests(scanner)).find((x) => x.id === b.festId);
+  if (!f) return fail('You are not on this fest’s gate team.', 403);
+  if (!f.counters.length) return fail(`Your shift is on ${dateRange(f.shift_day!, f.shift_day!)}.`, 403);
 
-  // Volunteers work the counter their duty says — whatever the browser sends. Owners and co-organizers
-  // (no duty) may pick any counter.
-  const manager = rows.some((f) => f.duty === null);
-  const counter: Counter = manager
-    ? (COUNTERS.includes(b.counter as Counter) ? (b.counter as Counter) : 'gate')
-    : counterFor(rows[0].duty);
+  // Volunteers work only the counter(s) their role(s) give — a counter the browser sends is used only if it is one of
+  // them. Owners and co-organizers may pick any counter.
+  const counter: Counter = f.counters.includes(b.counter as Counter) ? (b.counter as Counter) : f.counters[0];
 
   const live = liveOf(b.payload);
   if (counter !== 'gate') {

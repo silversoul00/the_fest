@@ -1,17 +1,15 @@
-import { requireUser } from '@/lib/auth';
-import { getMembers, getOwnFest } from '@/lib/queries';
+import { pageAccess } from '@/lib/fest-access';
+import Link from 'next/link';
 import { FestForm } from '../../FestForm';
 import { festFormFields, isRenameNote, renameReviewFor } from '@/lib/fest-form';
-import { addMember, setAllowTransfers, cancelFestAction, removeMember, setFestStatus, updateFest } from '../../actions';
+import { setAllowTransfers, cancelFestAction, setFestStatus, updateFest } from '../../actions';
 import { ActionForm, Submit } from '@/components/forms';
 import { siteUrlOrNull } from '@/lib/env';
 import { sql } from '@/lib/db';
 
 export default async function Settings({ params }: { params: Promise<{ festId: string }> }) {
-  const user = await requireUser('organizer');
-  const fest = await getOwnFest((await params).festId, user);
+  const { fest, access } = await pageAccess((await params).festId, 'fest');
   const site = siteUrlOrNull() ?? '';
-  const members = await getMembers(fest.id);
   const [{ holders }] = await sql<{ holders: number }[]>`
     select count(distinct user_id)::int as holders from tickets where fest_id = ${fest.id} and status <> 'void'`;
 
@@ -64,34 +62,15 @@ export default async function Settings({ params }: { params: Promise<{ festId: s
         <div className="h3 mb16">Fest details</div>
         <FestForm action={updateFest} fest={festFormFields(fest)} holders={holders} rename={renameReviewFor(fest, holders)} />
       </div>
-      <div className="card stack g12" id="team">
-        <div className="h3">Co-organizers</div>
-        <p className="small soft">People who can run this fest with you: tickets, schedule, announcements, sponsors, volunteers, sales and UPI matching. Only you can change where money goes, refund, cancel the fest or change this list.</p>
-        {members.length === 0 ? <p className="small muted">Just you so far.</p> : (
-          <div className="stack g8">
-            {members.map((m) => (
-              <div key={m.id} className="row between g8 small member">
-                <span className="grow">{m.name ?? <span className="muted">Not signed up yet</span>} · <span className="mono">{m.email}</span></span>
-                {(fest.is_owner || m.email === user.email.toLowerCase()) && (
-                  <form action={removeMember}>
-                    <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={m.id} />
-                    <button className="btn sm outline">{fest.is_owner ? 'Remove' : 'Leave fest'}</button>
-                  </form>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-        {fest.is_owner && (
-          <ActionForm action={addMember}>
-            <input type="hidden" name="festId" value={fest.id} />
-            <label className="field"><span>Add by email</span><input className="input" type="email" name="email" placeholder="cofounder@college.edu" /></label>
-            <Submit className="btn sm">Add co-organizer</Submit>
-          </ActionForm>
-        )}
+      <div className="card row between wrap-row g8" id="team">
+        <div className="grow" style={{ minWidth: 200 }}>
+          <div className="h3">Team &amp; co-organizers</div>
+          <p className="small soft mt8">Co-organizers, finance, sponsorship and media leads, event heads and volunteers are managed on the Team tab.</p>
+        </div>
+        <Link href={`/organizer/${fest.id}/team`} className="btn sm outline">Open Team →</Link>
       </div>
 
-      {fest.is_owner && fest.status !== 'cancelled' && fest.status !== 'ended' && (
+      {access.perms.has('cancel') && fest.status !== 'cancelled' && fest.status !== 'ended' && (
         <div className="card stack g12" style={{ borderColor: 'rgba(255,45,85,.35)' }}>
           <div className="h3 c-red">Cancel this fest</div>
           <p className="small soft">Stops ticket sales and refunds every unused ticket in full. Card payments are refunded automatically; zero-fee UPI payments appear in Sales for you to send back. This can’t be undone.</p>

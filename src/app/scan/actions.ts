@@ -5,6 +5,8 @@ import {
   clearFailedLogins, createSession, destroySession, countLoginAttempt, normalizeEmail, loginBlockedMessage, verifyPassword,
 } from '@/lib/auth';
 import { scannableFests } from '@/lib/queries';
+import { rolesReady } from '@/lib/fest-access';
+import { dateRange } from '@/lib/format';
 import { sendVerification } from '@/lib/verify';
 import { reportError } from '@/lib/errors';
 import type { ActionState, User } from '@/lib/types';
@@ -24,12 +26,16 @@ export async function scannerLogin(_: ActionState, fd: FormData): Promise<Action
     return { error: 'Wrong email or password.' };
   }
   await clearFailedLogins(email);
-  const fests = await scannableFests(u);
-  if (!fests.length && !u.verified && (await sql`select 1 from fest_staff where email = ${email} and can_scan`).length) {
+  const all = await scannableFests(u);
+  const fests = all.filter((f) => f.counters.length);
+  if (!all.length && !u.verified && (await rolesReady())
+      && (await sql`select 1 from fest_roles where email = ${email} and (can_scan or role = 'co_organizer')`).length) {
     await sendVerification(u.id).catch((e) => reportError(e, 'verification email'));
     return { error: `Confirm your email first — we’ve sent a link to ${email}. Open it, then unlock the scanner again.` };
   }
-  if (!fests.length) return { error: 'You’re not on any fest’s gate team yet. Ask the organizer to add your email under Volunteers.' };
+  const later = all.find((f) => f.shift_day);
+  if (!fests.length && later) return { error: `Your shift at ${later.name} is on ${dateRange(later.shift_day!, later.shift_day!)}. The scanner opens for you that day.` };
+  if (!fests.length) return { error: 'You’re not on any fest’s gate team yet. Ask the organizer to add your email under Team.' };
 
   await createSession(u.id, 'scanner');
   redirect('/scan');

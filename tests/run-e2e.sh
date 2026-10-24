@@ -15,6 +15,8 @@ node scripts/check-pricing.mjs 2>/dev/null
 node scripts/check-upi-parse.mjs 2>/dev/null
 node --conditions=react-server scripts/check-qr2.mjs 2>/dev/null
 node scripts/check-format.mjs 2>/dev/null
+# Team & Roles: every organizer action/page checks its permission (fails the run otherwise)
+node scripts/check-guards.mjs
 
 # Stop any server already on :3000
 for d in /proc/[0-9]*; do c=$(tr '\0' ' ' < "$d/cmdline" 2>/dev/null || true); case "$c" in next-server*) kill "${d#/proc/}" 2>/dev/null || true;; esac; done
@@ -86,4 +88,8 @@ python3 tests/bugfix_oct23_retest.py
 # Fix round 2 (2026-10-23-bugfix-review-1 / -test-1): End→rename→Reopen goes to review, rename note survives, tick appears
 # when the first ticket sells mid-edit, Sales last page, no #418 on a slow connection, ?next= with broken encoding
 python3 tests/bugfix_oct23_fix2.py
+# Team & Roles (2026-10-24, v2.7): tabs per role, forged forms from every role refused, pending until confirmed, removal
+# cuts access + scanner sessions, co-organizer rules, duplicates/days, scanner counters, activity log, /me roles, 390px,
+# migration of co-organizers/volunteers (run twice)
+python3 tests/team_roles.py
 echo "✓ Release check passed"

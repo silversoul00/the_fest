@@ -53,7 +53,7 @@ try {
       console.error('Refusing to --reset a Supabase database. Add --yes-really if you are sure.');
       process.exit(1);
     }
-    await sql`truncate login_attempts, app_errors, app_alert_state, email_verifications, payouts, upi_credits, fest_members, password_resets, email_outbox, sponsor_visits, sponsors, announcements, schedule_events, fest_staff, scans, tickets, orders, ticket_types, fests, sessions, users restart identity cascade`;
+    await sql`truncate login_attempts, app_errors, app_alert_state, email_verifications, payouts, upi_credits, fest_members, password_resets, email_outbox, sponsor_visits, sponsors, announcements, schedule_events, fest_staff, fest_roles, fest_activity, scans, tickets, orders, ticket_types, fests, sessions, users restart identity cascade`;
     console.log('• wiped');
   }
 
@@ -74,7 +74,9 @@ try {
   // ~120 attendees
   const crowd = [];
   for (let i = 0; i < 120; i++) {
-    const nm = `${pick(FIRST)} ${pick(LAST)}`;
+    // Never the demo student's name: tests (and people) tell "Arjun Sharma" apart from the crowd by name
+    let nm = `${pick(FIRST)} ${pick(LAST)}`;
+    while (nm === 'Arjun Sharma') nm = `${pick(FIRST)} ${pick(LAST)}`;
     crowd.push(await mkUser(`attendee${i + 1}@seed.thefest.in`, nm, 'student', pick(COLLEGES)));
   }
 
@@ -157,21 +159,41 @@ try {
   await sell('hackverse', student, 0, 1, 1);
 
   // Staff
+  // Team & Roles (v2.7). Gate team (as before) plus role holders on normal student accounts.
   const staff = [
-    ['volunteer@thefest.in', 'Kiran Volunteer', 'Gate 1'],
-    ['organizer@thefest.in', 'Riya Kapoor', 'Gate 1'],
-    ['gate2@seed.thefest.in', 'Manoj Gate', 'Gate 2'],
-    ['gate3@seed.thefest.in', 'Priya Gate', 'Gate 3'],
-    ['desk@seed.thefest.in', 'Lakshmi Desk', 'Registration desk'],
-    ['stage@seed.thefest.in', 'Rahul Stage', 'Main stage'],
-    ['lunch@seed.thefest.in', 'Lata Lunch', 'Lunch counter'],
-    ['stay@seed.thefest.in', 'Sunil Stay', 'Stay desk'],
+    ['volunteer@thefest.in', 'Kiran Volunteer', 'vol_gate', 'Gate 1', true],
+    ['organizer@thefest.in', 'Riya Kapoor', 'vol_gate', 'Gate 1', true],
+    ['gate2@seed.thefest.in', 'Manoj Gate', 'vol_gate', 'Gate 2', true],
+    ['gate3@seed.thefest.in', 'Priya Gate', 'vol_gate', 'Gate 3', true],
+    ['desk@seed.thefest.in', 'Lakshmi Desk', 'desk', 'Registration desk', true],
+    ['stage@seed.thefest.in', 'Rahul Stage', 'vol_gate', 'Main stage', false],
+    ['lunch@seed.thefest.in', 'Lata Lunch', 'vol_lunch', 'Lunch counter', true],
+    ['stay@seed.thefest.in', 'Sunil Stay', 'vol_stay', 'Stay desk', true],
   ];
-  for (const [i, [email, name, duty]] of staff.entries()) {
-    await sql`insert into fest_staff (fest_id, email, name, duty, can_scan, checked_in_at)
-              values (${festIds['neon-utsav']}, ${email}, ${name}, ${duty}, ${/^(Gate|Lunch|Stay)/.test(duty)}, ${i < 4 ? at(0, 9, 10 * i) : null})`;
+  for (const [i, [email, name, role, duty, scan]] of staff.entries()) {
+    await sql`insert into fest_roles (fest_id, email, name, role, duty, can_scan, checked_in_at, added_by)
+              values (${festIds['neon-utsav']}, ${email}, ${name}, ${role}, ${duty}, ${scan}, ${i < 4 ? at(0, 9, 10 * i) : null}, ${organizer})`;
   }
-  await sql`insert into fest_staff (fest_id, email, name, duty) values (${festIds['hackverse']}, 'volunteer@thefest.in', 'Kiran Volunteer', 'Gate 1')`;
+  await sql`insert into fest_roles (fest_id, email, name, role, duty, added_by) values (${festIds['hackverse']}, 'volunteer@thefest.in', 'Kiran Volunteer', 'vol_gate', 'Gate 1', ${organizer})`;
+  const holders = [
+    ['cohost@seed.thefest.in', 'Chetan Cohost', 'co_organizer', null, null],
+    ['finance@seed.thefest.in', 'Farah Finance', 'finance', null, null],
+    ['sponsorlead@seed.thefest.in', 'Sameer Sponsorship', 'sponsorship', null, null],
+    ['media@seed.thefest.in', 'Meera Media', 'media', null, null],
+    ['media@seed.thefest.in', 'Meera Media', 'judge', 'Battle of Bands', null],
+    ['eventhead@seed.thefest.in', 'Esha Events', 'event_head', 'Battle of Bands', null],
+    ['judge@seed.thefest.in', 'Jai Judge', 'judge', 'Fashion Show', day(1)],
+  ];
+  for (const [email, name, role, label, d] of holders) {
+    if (!(await sql`select 1 from users where email = ${email}`).length) await mkUser(email, name, 'student', COLLEGES[0]);
+    await sql`insert into fest_roles (fest_id, email, name, role, scope_label, scope_day, added_by)
+              values (${festIds['neon-utsav']}, ${email}, ${name}, ${role}, ${label}, ${d}, ${organizer})`;
+  }
+  // Pending: added, but no account yet
+  await sql`insert into fest_roles (fest_id, email, name, role, added_by) values (${festIds['neon-utsav']}, 'newvolunteer@seed.thefest.in', 'Nisha New', 'vol_gate', ${organizer})`;
+  await sql`insert into fest_activity (fest_id, actor_id, actor_email, actor_role, action, summary) values
+    (${festIds['neon-utsav']}, ${organizer}, 'organizer@thefest.in', 'owner', 'role.add', 'Added Farah Finance as Finance lead'),
+    (${festIds['neon-utsav']}, ${organizer}, 'organizer@thefest.in', 'owner', 'role.add', 'Added Meera Media as Media / PR')`;
 
   // Check-ins: Neon Utsav day 1 + today; Goal Rush all-but-few
   const gates = ['Gate 1', 'Gate 2', 'Gate 3'];

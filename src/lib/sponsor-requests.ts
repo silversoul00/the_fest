@@ -1,7 +1,7 @@
 import 'server-only';
+import { rolesReady } from './fest-access';
 import { sql } from './db';
 import { festAnalytics } from './analytics';
-import { canManage } from './queries';
 import { groupColleges } from './sponsor-leads';
 import { boothCode } from './ticket-crypto';
 import { todayIST } from './format';
@@ -118,11 +118,13 @@ export type Decision = 'accept' | 'decline' | 'withdraw';
  * Accept is one transaction: the `status = 'sent'` guard on the update locks the row, so a double-click or a second
  * tab gets "already answered" and only one sponsors row is ever made.
  */
-export async function decideRequest(user: User, side: Side, id: string, what: Decision, reply = ''):
+export async function decideRequest(user: User, side: Side, id: string, what: Decision, reply = '', orgFestId?: string):
   Promise<ActionState & { festId?: string; sponsorId?: string }> {
+  // As the fest: only requests of the fest the caller's Sponsors permission was checked for (requirePerm)
+  if (side === 'org' && !orgFestId) return { error: 'Request not found.' };
   const [r] = await sql<{ id: string; fest_id: string; direction: string; status: string; brand_user_id: string }[]>`
     select r.id, r.fest_id, r.direction, r.status, r.brand_user_id from sponsor_requests r join fests f on f.id = r.fest_id
-    where r.id = ${id} and ${side === 'brand' ? sql`r.brand_user_id = ${user.id}` : canManage(user)}`;
+    where r.id = ${id} and ${side === 'brand' ? sql`r.brand_user_id = ${user.id}` : sql`r.fest_id = ${orgFestId!}`}`;
   if (!r) return { error: 'Request not found.' };
   if (!user.verified) return { error: 'Confirm your email first.' };
   const receiver: Side = r.direction === 'brand_to_org' ? 'org' : 'brand';
@@ -225,6 +227,9 @@ export async function requestEmailTargets(id: string) {
     from sponsor_requests r join fests f on f.id = r.fest_id join users b on b.id = r.brand_user_id join users o on o.id = f.organizer_id
     left join users s on s.id = r.sent_by where r.id = ${id}`;
   if (!r) return null;
-  const members = await sql<{ email: string }[]>`select email::text from fest_members where fest_id = ${r.fest_id}`;
+  // Owner, co-organizers and Sponsorship leads (confirmed accounts only)
+  const members = (await rolesReady()) ? await sql<{ email: string }[]>`
+    select r.email::text from fest_roles r join users u on u.email = r.email and u.email_verified_at is not null
+    where r.fest_id = ${r.fest_id} and r.role in ('co_organizer', 'sponsorship')` : [];
   return { ...r, orgEmails: [...new Set([r.owner_email, ...members.map((m) => m.email)])] };
 }

@@ -1,16 +1,18 @@
 import { getUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { isUuid } from '@/lib/http';
-import { canManage } from '@/lib/queries';
+import { festAccess } from '@/lib/fest-access';
 import { csvResponse, toCsv } from '@/lib/csv';
 
 // CSV of every issued ticket — for the registration desk, certificates, or Excel.
 export async function GET(_req: Request, { params }: { params: Promise<{ festId: string }> }) {
   const user = await getUser();
   const { festId } = await params;
-  if (!user || user.role !== 'organizer' || !isUuid(festId)) return new Response('Not found', { status: 404 });
-  const [fest] = await sql<{ slug: string }[]>`select f.slug from fests f where f.id = ${festId} and ${canManage(user)}`;
-  if (!fest) return new Response('Not found', { status: 404 });
+  if (!user || !isUuid(festId)) return new Response('Not found', { status: 404 });
+  // Same rule as the Export button: owner, co-organizers and Finance leads (pageAccess-equivalent for a route)
+  const access = await festAccess(festId, user);
+  if (!access?.perms.has('export')) return new Response('Not found', { status: 404 });
+  const fest = access.fest;
 
   const rows = await sql<Record<string, unknown>[]>`
     select t.code, t.holder_name, u.email::text as email, u.phone, u.college, tt.name as ticket_type,

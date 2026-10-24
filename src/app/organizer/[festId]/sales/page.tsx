@@ -1,6 +1,5 @@
-import { requireUser } from '@/lib/auth';
+import { pageAccess } from '@/lib/fest-access';
 import { sql } from '@/lib/db';
-import { getOwnFest } from '@/lib/queries';
 import Link from 'next/link';
 import { dayLabel, num, rupees, time } from '@/lib/format';
 import { Empty, Stat } from '@/components/ui';
@@ -10,13 +9,16 @@ import { markUpiRefundSent, refundOrderAction } from '../../actions';
 const PER_PAGE = 50;
 
 export default async function Sales({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ q?: string; page?: string }> }) {
-  const user = await requireUser('organizer');
-  const fest = await getOwnFest((await params).festId, user);
+  const { fest, access } = await pageAccess((await params).festId, 'sales');
+  // Desk volunteers look attendees up (name, email, ticket code) — no money figures, no refunds
+  const money = access.perms.has('money');
+  const canRefund = access.perms.has('refund');
   const { q = '', page: rawPage } = await searchParams;
   const like = q.trim() ? `%${q.trim()}%` : null;
   const asked = Math.min(1000, Math.max(1, Math.floor(Number(rawPage) || 1)));
   const match = sql`o.fest_id = ${fest.id} and o.status in ('paid', 'refunded')
-        ${like ? sql`and (u.name ilike ${like} or u.email ilike ${like} or u.college ilike ${like})` : sql``}`;
+        ${like ? sql`and (u.name ilike ${like} or u.email ilike ${like} or u.college ilike ${like}
+                          or exists (select 1 from tickets t where t.order_id = o.id and t.code ilike ${like}))` : sql``}`;
 
   const [byType, toSend, [{ total }]] = await Promise.all([
     sql<{ name: string; qty: number; gross: number; fees: number }[]>`
@@ -35,11 +37,12 @@ export default async function Sales({ params, searchParams }: { params: Promise<
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   // A page number past the end (an old link, a typed URL) shows the last real page
   const page = Math.min(asked, pages);
-  const orders = await sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string }[]>`
+  const orders = await sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string; codes: string | null }[]>`
       select o.id, o.paid_at as created_at, o.qty, o.amount_paise, o.platform_fee_paise, o.provider, o.status, o.refunded_paise, o.refund_status, o.utr,
              case when o.addon_for is not null then (o.status = 'paid')::int
                   else (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int end as unused,
-             u.name, u.email::text, u.college, tt.name as type
+             u.name, u.email::text, u.college, tt.name as type,
+             (select string_agg(t.code, ' ' order by t.code) from tickets t where t.order_id = o.id and t.status <> 'void') as codes
       from orders o join users u on u.id = o.user_id join ticket_types tt on tt.id = o.ticket_type_id
       where ${match}
       order by o.paid_at desc, o.id limit ${PER_PAGE} offset ${(page - 1) * PER_PAGE}`;
@@ -51,10 +54,10 @@ export default async function Sales({ params, searchParams }: { params: Promise<
     <div className="stack g16">
       <div className="row between wrap-row g8">
         <h1 className="h2">Sales</h1>
-        <a className="btn sm outline" href={`/organizer/${fest.id}/export`} download>⬇ Export CSV</a>
+        {access.perms.has('export') && <a className="btn sm outline" href={`/organizer/${fest.id}/export`} download>⬇ Export CSV</a>}
       </div>
 
-      <div className="grid-2 grid-3">
+      {money && <><div className="grid-2 grid-3">
         <Stat label="Tickets" value={num(totals.qty)} />
         <Stat label="Collected" value={rupees(totals.gross, { compact: true })} color="var(--blue)" sub="incl. convenience fees" />
         <Stat label="Your payout" value={rupees(totals.gross - totals.fees, { compact: true })} color="var(--green)" sub={`${rupees(totals.fees, { compact: true })} fees & payment charges`} />
@@ -69,9 +72,9 @@ export default async function Sales({ params, searchParams }: { params: Promise<
             ))}
           </tbody>
         </table>
-      </div>
+      </div></>}
 
-      {toSend.length > 0 && (
+      {money && toSend.length > 0 && (
         <div className="card stack g8" style={{ borderColor: 'rgba(56,189,248,.35)' }}>
           <div className="h3">UPI refunds to send</div>
           <p className="xs muted">These students paid your fest’s UPI directly. Send the amount back from your bank app (to the UPI ID that paid, found by its UTR), then mark it sent.</p>
@@ -79,32 +82,32 @@ export default async function Sales({ params, searchParams }: { params: Promise<
             <div key={o.id} className="row wrap-row g12 small">
               <span className="grow">{o.name} · {o.email} · UTR <span className="mono">{o.utr ?? '—'}</span></span>
               <span className="mono">{rupees(o.refunded_paise)}</span>
-              {fest.is_owner && <form action={markUpiRefundSent}><input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="orderId" value={o.id} /><button className="btn sm blue">Mark sent</button></form>}
+              {canRefund && <form action={markUpiRefundSent}><input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="orderId" value={o.id} /><button className="btn sm blue">Mark sent</button></form>}
             </div>
           ))}
         </div>
       )}
 
       <form className="row g8" role="search">
-        <input className="input grow" type="search" name="q" defaultValue={q} placeholder="Search buyer, email, college" />
+        <input className="input grow" type="search" name="q" defaultValue={q} placeholder="Search buyer, email, college, ticket code" />
         <button className="btn" type="submit">Search</button>
       </form>
 
       {orders.length === 0 ? <Empty icon="💸" title={q ? 'No matching orders' : 'No sales yet'}>{q ? '' : 'Share your fest link to start selling.'}</Empty> : (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Buyer</th><th>Ticket</th><th className="num">Qty</th><th className="num">Amount</th><th>When</th><th></th></tr></thead>
+            <thead><tr><th>Buyer</th><th>Ticket</th><th className="num">Qty</th>{money && <th className="num">Amount</th>}<th>When</th><th></th></tr></thead>
             <tbody>
               {orders.map((o) => (
                 <tr key={o.id}>
                   <td><div>{o.name}</div><div className="xs muted">{o.email}{o.college ? ` · ${o.college}` : ''}</div></td>
-                  <td className="small">{o.type}{o.provider === 'demo' && <span className="badge gray" style={{ marginLeft: 6 }}>demo</span>}</td>
+                  <td className="small">{o.type}{o.provider === 'demo' && <span className="badge gray" style={{ marginLeft: 6 }}>demo</span>}{o.codes && <div className="xs muted mono wrap-anywhere">{o.codes}</div>}</td>
                   <td className="num">{o.qty}</td>
-                  <td className="num">{rupees(o.amount_paise)}{o.refunded_paise > 0 && <div className="xs c-orange">−{rupees(o.refunded_paise)} refunded</div>}</td>
+                  {money && <td className="num">{rupees(o.amount_paise)}{o.refunded_paise > 0 && <div className="xs c-orange">−{rupees(o.refunded_paise)} refunded</div>}</td>}
                   {/* A fixed IST date and time (not "5m ago"): the same text on every render, whatever the clock or the browser */}
                   <td className="xs muted" style={{ whiteSpace: 'nowrap' }}>{o.created_at ? `${dayLabel(o.created_at)}, ${time(o.created_at)}` : '—'}</td>
                   <td style={{ minWidth: 120 }}>
-                    {o.status === 'refunded' ? <span className="badge orange">Refunded</span> : !fest.is_owner ? null : o.unused > 0 ? (
+                    {o.status === 'refunded' ? <span className="badge orange">Refunded</span> : !canRefund ? null : o.unused > 0 ? (
                       <details>
                         <summary className="xs c-red" style={{ cursor: 'pointer' }}>Cancel / refund</summary>
                         <ActionForm action={refundOrderAction} className="form mt8">

@@ -463,3 +463,62 @@ create index if not exists sponsor_requests_brand_idx on sponsor_requests(brand_
 create index if not exists sponsor_requests_fest_idx on sponsor_requests(fest_id, created_at desc);
 alter table brand_profiles   enable row level security;
 alter table sponsor_requests enable row level security;
+
+-- v2.7 (Oct 2026): Team & Roles. Organizers give students fixed roles by email (Co-organizer, Event head, Judge,
+-- Finance lead, Sponsorship lead, Media/PR, Gate/Lunch/Stay volunteer, Desk volunteer). A role works once an account
+-- with that email has confirmed it (and, if it has a day, only on that IST day). After v2.7 the app reads and writes only
+-- fest_roles; fest_members and fest_staff are kept untouched for rollback (dropped in a later version).
+create table if not exists fest_roles (
+  id            uuid primary key default gen_random_uuid(),
+  fest_id       uuid not null references fests(id) on delete cascade,
+  email         citext not null,
+  name          text not null default '',
+  role          text not null check (role in ('co_organizer', 'event_head', 'judge', 'finance', 'sponsorship', 'media',
+                                              'vol_gate', 'vol_lunch', 'vol_stay', 'desk')),
+  scope_label   text,               -- "Only for": e.g. "Battle of Bands" (free text in v1)
+  scope_day     date,               -- optional: the role works only on this IST day
+  event_id      uuid,               -- reserved for Competitions; no foreign key yet
+  duty          text,               -- volunteer's desk name, e.g. "Gate 2" (display; the counter comes from the role)
+  can_scan      boolean not null default true,
+  checked_in_at timestamptz,
+  added_by      uuid references users(id) on delete set null,
+  created_at    timestamptz not null default now()
+);
+create unique index if not exists fest_roles_uniq
+  on fest_roles(fest_id, email, role, coalesce(scope_day, '1970-01-01'::date), coalesce(scope_label, ''));
+create index if not exists fest_roles_email_idx on fest_roles(email);
+
+-- Who did what in a fest (append-only in the app; rows older than a year are cleared)
+create table if not exists fest_activity (
+  id          bigserial primary key,
+  fest_id     uuid not null references fests(id) on delete cascade,
+  actor_id    uuid references users(id) on delete set null,
+  actor_email citext not null,
+  actor_role  text not null,        -- 'owner' | role key(s) | 'system'
+  action      text not null,        -- 'refund', 'fest.edit', 'role.add', 'upi.confirm', …
+  summary     text not null,        -- plain sentence shown in the log
+  detail      jsonb not null default '{}',
+  created_at  timestamptz not null default now()
+);
+create index if not exists fest_activity_idx on fest_activity(fest_id, created_at desc);
+alter table fest_roles    enable row level security;
+alter table fest_activity enable row level security;
+
+-- One-time copy: existing co-organizers and volunteers become roles. Runs only once per database (marked with a
+-- table comment), so re-running this file never brings back a role an organizer removed later.
+do $$
+begin
+  if obj_description('public.fest_roles'::regclass, 'pg_class') is distinct from 'v2.7 copied' then
+    insert into fest_roles (fest_id, email, role, added_by, created_at)
+      select fest_id, email, 'co_organizer', added_by, created_at from fest_members
+      on conflict do nothing;
+    insert into fest_roles (fest_id, email, name, role, duty, can_scan, checked_in_at, created_at)
+      select fest_id, email, name,
+             case when lower(trim(duty)) like 'lunch%' then 'vol_lunch'
+                  when lower(trim(duty)) like 'stay%' or lower(trim(duty)) like 'hostel%' then 'vol_stay'
+                  else 'vol_gate' end,
+             duty, can_scan, checked_in_at, created_at from fest_staff
+      on conflict do nothing;
+    comment on table fest_roles is 'v2.7 copied';
+  end if;
+end $$;

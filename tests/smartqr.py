@@ -34,7 +34,7 @@ B_EMAIL = q(f"select email from users where email like 'attendee%' and email <> 
 q(f"update users set phone='9845012345' where email='{MAIN_EMAIL}'")
 q(f"update tickets set holder_name='Abhishek Venkataraman Iyer' where id='{MAIN}'")
 # Duty "First aid" is no longer special: like any other duty name it scans at the gate.
-q(f"insert into fest_staff (fest_id, email, name, duty, can_scan) values ('{FID}', '{B_EMAIL}', 'Bharath B', 'First aid', true) on conflict do nothing")
+q(f"insert into fest_roles (fest_id, email, name, role, duty, can_scan) values ('{FID}', '{B_EMAIL}', 'Bharath B', 'vol_gate', 'First aid', true) on conflict do nothing")
 IDB_SHIFT_DAY = """new Promise((res, rej) => { const r = indexedDB.open('thefest-scan', 1); r.onerror = () => rej(r.error);
   r.onsuccess = () => { const db = r.result, tx = db.transaction('queue', 'readwrite'), c = tx.objectStore('queue').openCursor(); let n = 0;
     c.onsuccess = () => { const cur = c.result; if (cur) { const v = cur.value; v.at -= 86400000; cur.update(v); n++; cur.continue(); } };
@@ -188,13 +188,13 @@ async def main():
         check('AC17 scanner role card fits 390px', await no_hscroll(org))
         await org.screenshot(path=S + 'smartqr_org_card.png', full_page=True)
         await oc.set_offline(False)
-        q(f"insert into fest_members (fest_id, email) values ('{FID}', 'organizer2@thefest.in') on conflict do nothing")
+        q(f"insert into fest_roles (fest_id, email, role) values ('{FID}', 'organizer2@thefest.in', 'co_organizer') on conflict do nothing")
         cc, co = await scanner(b, 'organizer2@thefest.in', '&counter=lunch')
         await cc.set_offline(True); await scan(co, U_MAIN)
         check('AC8 co-organizer sees all sections incl. holder phone', await co.locator('[data-role=org]').count() == 1 and await co.locator('[data-role=gate]').count() == 1)
         check('FA counter picker has no first aid', 'first aid' not in (await co.inner_text('select[aria-label=Counter]')).lower())
         await cc.set_offline(False); await cc.close()
-        q(f"delete from fest_members where fest_id='{FID}' and email='organizer2@thefest.in'")
+        q(f"delete from fest_roles where fest_id='{FID}' and email='organizer2@thefest.in'")
 
         # ── Gate volunteer offline (AC4, AC6, AC10, AC11) ──
         U_T2 = tf2(T2)

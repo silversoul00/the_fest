@@ -23,6 +23,8 @@ export const REQUIRED_TABLES = [
   'sponsor_leads',
   // v2.6 (sponsorship requests)
   'brand_profiles', 'sponsor_requests',
+  // v2.7 (team & roles)
+  'fest_roles', 'fest_activity',
 ] as const;
 
 export const REQUIRED_COLUMNS = [

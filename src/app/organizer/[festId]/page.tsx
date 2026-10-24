@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { requireUser } from '@/lib/auth';
+import { pageAccess, rolesReady } from '@/lib/fest-access';
 import { sql } from '@/lib/db';
-import { festStats, getOwnFest } from '@/lib/queries';
+import { festStats } from '@/lib/queries';
 import { ago, num, rupees, time } from '@/lib/format';
 import { Stat } from '@/components/ui';
 import { AutoRefresh } from '@/components/AutoRefresh';
@@ -9,10 +9,11 @@ import { setFestStatus } from '../actions';
 import { isRenameNote } from '@/lib/fest-form';
 
 export default async function Overview({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ created?: string }> }) {
-  const user = await requireUser('organizer');
   const { festId } = await params;
   const { created } = await searchParams;
-  const fest = await getOwnFest(festId, user);
+  const { fest, access } = await pageAccess(festId, 'overview');
+  const money = access.perms.has('money');
+  const canPublish = access.perms.has('fest');
 
   const [stats, daily, hourly, gates, recent, staff, types] = await Promise.all([
     festStats(fest.id),
@@ -34,8 +35,9 @@ export default async function Overview({ params, searchParams }: { params: Promi
       select s.id, s.result, s.gate, s.created_at, t.holder_name as holder, s.detail
       from scans s left join tickets t on t.id = s.ticket_id
       where s.fest_id = ${fest.id} order by s.created_at desc limit 8`,
-    sql<{ total: number; inn: number }[]>`
-      select count(*)::int as total, count(checked_in_at)::int as inn from fest_staff where fest_id = ${fest.id}`,
+    (await rolesReady()) ? sql<{ total: number; inn: number }[]>`
+      select count(distinct email)::int as total, count(distinct email) filter (where checked_in_at is not null)::int as inn
+      from fest_roles where fest_id = ${fest.id} and role in ('vol_gate', 'vol_lunch', 'vol_stay', 'desk')` : [{ total: 0, inn: 0 }],
     sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active`,
   ]);
 
@@ -53,7 +55,7 @@ export default async function Overview({ params, searchParams }: { params: Promi
 
       {created && <div className="alert ok">🎉 Fest created! Add more ticket types, your schedule and volunteers — then publish.</div>}
 
-      {fest.status === 'draft' && (
+      {fest.status === 'draft' && canPublish && (
         <div className="card row between wrap-row g12" style={{ borderColor: 'rgba(255,224,52,.3)' }}>
           <div>
             <div className="h3">Your fest is a draft</div>
@@ -86,7 +88,8 @@ export default async function Overview({ params, searchParams }: { params: Promi
 
       <div className="grid-2 grid-4">
         <Stat label="Tickets sold" value={num(stats.tickets)} sub={`${num(stats.sold_today)} in last 24h`} />
-        <Stat label="Your revenue" value={rupees(stats.revenue, { compact: true })} sub={`${num(stats.orders)} orders`} color="var(--green)" />
+        {money ? <Stat label="Your revenue" value={rupees(stats.revenue, { compact: true })} sub={`${num(stats.orders)} orders`} color="var(--green)" />
+          : <Stat label="Orders" value={num(stats.orders)} color="var(--green)" />}
         <Stat label="Checked in" value={num(stats.checked_in)} sub={`${pct}% of ticket holders`} color="var(--blue)" />
         <Stat label="Entries / hour" value={num(stats.scans_hour)} sub={`${num(stats.blocked)} blocked at gates`} color="var(--orange)" />
       </div>

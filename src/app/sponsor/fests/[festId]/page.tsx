@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
 import { isUuid } from '@/lib/http';
 import { dateRange, num } from '@/lib/format';
-import { canManage } from '@/lib/queries';
+import { festAccess } from '@/lib/fest-access';
 import { ActionForm, Submit } from '@/components/forms';
 import { SponsorShell } from '@/components/SponsorShell';
 import { RequestFields } from '@/components/RequestCard';
@@ -22,11 +22,13 @@ export const metadata = { title: 'Media kit' };
 export default async function MediaKit({ params }: { params: Promise<{ festId: string }> }) {
   const user = await requireUser();
   const { festId } = await params;
-  if (!isUuid(festId) || user.role === 'student' || !(await requestsReady())) notFound();
+  if (!isUuid(festId) || !(await requestsReady())) notFound();
+  // Not a brand: only the fest's owner and people whose role covers Sponsors may preview it
+  if (user.role !== 'sponsor' && !(await festAccess(festId, user))?.perms.has('sponsors')) notFound();
   const [f] = await sql<{ id: string; name: string; college: string; city: string; venue: string | null; category: string; starts_on: string; ends_on: string; emoji: string; visible: boolean }[]>`
     select f.id, f.name, f.college, f.city, f.venue, f.category, f.starts_on, f.ends_on, f.emoji, ${visibleToBrands()} as visible
     from fests f where f.id = ${festId}
-      and ${user.role === 'sponsor' ? visibleToBrands() : canManage(user)}`;
+      and ${user.role === 'sponsor' ? visibleToBrands() : sql`true`}`;
   if (!f) notFound();
   const kit = await mediaKit(f.id);
   const brand = user.role === 'sponsor';

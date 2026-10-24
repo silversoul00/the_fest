@@ -1,16 +1,15 @@
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth';
-import { sql } from '@/lib/db';
 import { createFest } from '../actions';
 import { FestForm } from '../FestForm';
-import { canManage } from '@/lib/queries';
+import { myFestIds } from '@/lib/fest-access';
 import { VerifyNotice } from '@/components/VerifyNotice';
 
 export const metadata = { title: 'New fest' };
 
 export default async function NewFest() {
   const user = await requireUser('organizer');
-  const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from fests f where ${canManage(user)}`;
+  const n = (await myFestIds(user)).length;
   return (
     <main className="wrap" style={{ maxWidth: 640, padding: '24px var(--gutter) 64px' }}>
       <div className="row between mb24">
