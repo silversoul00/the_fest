@@ -24,7 +24,10 @@ begin
   insert into users (email, password_hash, name, role, college, email_verified_at) values ('volunteer@thefest.in', pw, 'Kiran Volunteer', 'student', colleges[1], now()) returning id into vol;
   insert into users (email, password_hash, name, role, is_admin, email_verified_at) values ('admin@thefest.in', pw, 'THE FEST Admin', 'organizer', true, now()) returning id into adm;
   insert into users (email, password_hash, name, role, college, email_verified_at) values
-    ('lunch@seed.thefest.in', pw, 'Lata Lunch', 'student', colleges[1], now()), ('stay@seed.thefest.in', pw, 'Sunil Stay', 'student', colleges[1], now());
+    ('lunch@seed.thefest.in', pw, 'Lata Lunch', 'student', colleges[1], now()), ('stay@seed.thefest.in', pw, 'Sunil Stay', 'student', colleges[1], now()),
+    -- every seeded role holder can log in (only newvolunteer@ stays "no account yet")
+    ('gate2@seed.thefest.in', pw, 'Manoj Gate', 'student', colleges[1], now()), ('gate3@seed.thefest.in', pw, 'Priya Gate', 'student', colleges[1], now()),
+    ('desk@seed.thefest.in', pw, 'Lakshmi Desk', 'student', colleges[1], now()), ('stage@seed.thefest.in', pw, 'Rahul Stage', 'student', colleges[1], now());
 
   -- 120 attendees
   insert into users (email, password_hash, name, role, college, email_verified_at)

@@ -341,6 +341,9 @@ export async function addRole(_: ActionState, fd: FormData): Promise<ActionState
   if (!z.string().email().safeParse(email).success) return { error: 'Enter a valid email' };
   if (!isRoleKey(role)) return { error: 'Pick a role.' };
   if (role === 'co_organizer' && !g.access.perms.has('team_coorg')) return { error: 'Only the fest’s owner can add co-organizers.' };
+  // Finance lead can refund — only the owner hands that out (Harshith, Oct 24 2026)
+  if (role === 'finance' && !g.access.perms.has('team_coorg')) return { error: 'Only the fest’s owner can add a Finance lead.' };
+  if (email === user.email.toLowerCase()) return { error: 'You can’t add a role to your own email. Ask the fest’s owner.' };
   const name = clip(s(fd, 'name'), 80);
   const label = clip(s(fd, 'scope_label'), 60) || null;
   const day = s(fd, 'scope_day') || null;
@@ -389,16 +392,19 @@ export async function addRole(_: ActionState, fd: FormData): Promise<ActionState
   };
 }
 
-/** Remove one role row. Co-organizer rows: owner only. Nobody can remove the owner (the owner is not a role row). */
+/** Remove one role row. Co-organizer and Finance rows, and any role the owner holds: owner only. */
 export async function removeRole(fd: FormData) {
   const g = await requirePerm(fd, 'team');
   const { fest } = g;
   const id = s(fd, 'id');
   if (!isUuid(id)) return;
-  const [row] = await sql<{ email: string; name: string; role: string }[]>`
-    select email::text, name, role from fest_roles where id = ${id} and fest_id = ${fest.id}`;
+  const [row] = await sql<{ email: string; name: string; role: string; of_owner: boolean }[]>`
+    select r.email::text, r.name, r.role, (u.email = r.email) as of_owner
+    from fest_roles r join fests f on f.id = r.fest_id join users u on u.id = f.organizer_id
+    where r.id = ${id} and r.fest_id = ${fest.id}`;
   if (!row) return;
-  if (row.role === 'co_organizer' && !g.access.perms.has('team_coorg')) throw new Error('Only the fest’s owner can remove co-organizers.');
+  const ownerOnly = row.role === 'co_organizer' || row.role === 'finance' || row.of_owner;
+  if (ownerOnly && !g.access.perms.has('team_coorg')) throw new Error('Only the fest’s owner can remove this role.');
   const gone = await sql`delete from fest_roles where id = ${id} and fest_id = ${fest.id} returning id`;
   if (gone.length) {
     await endScannerIfNoScanRole(fest.id, row.email);
@@ -422,8 +428,12 @@ export async function leaveRole(fd: FormData) {
 
 export async function toggleCheckin(fd: FormData) {
   const g = await requirePerm(fd, 'team');
-  await sql`update fest_roles set checked_in_at = case when checked_in_at is null then now() else null end
-            where id = ${s(fd, 'id')} and fest_id = ${g.fest.id}`;
+  const id = s(fd, 'id');
+  if (!isUuid(id)) return;
+  // Check-in only for someone whose account is confirmed (pending people can't work yet); checking out always works
+  await sql`update fest_roles r set checked_in_at = case when r.checked_in_at is null then now() else null end
+            where r.id = ${id} and r.fest_id = ${g.fest.id}
+              and (r.checked_in_at is not null or exists (select 1 from users u where u.email = r.email and u.email_verified_at is not null))`;
   refresh(g.fest.id);
 }
 

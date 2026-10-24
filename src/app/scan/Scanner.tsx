@@ -317,10 +317,11 @@ export function Scanner({ counter, counters, fests, festId, festName, defaultGat
           </select>}
         </div>
 
-        <div className="row g8" style={{ alignItems: 'center' }}>
-          <div className="grow display" style={{ fontSize: 30, color: counter === 'gate' ? 'var(--green)' : 'var(--yellow)' }} data-counter={counter}>{COUNTER_LABEL[counter]}</div>
+        {/* The heading never shrinks; on a narrow phone the counter picker wraps below it */}
+        <div className="row wrap-row g8" style={{ alignItems: 'center' }}>
+          <div className="display" style={{ fontSize: 30, flex: '1 0 auto', whiteSpace: 'nowrap', color: counter === 'gate' ? 'var(--green)' : 'var(--yellow)' }} data-counter={counter}>{COUNTER_LABEL[counter]}</div>
           {counters.length > 1 && (
-            <select className="select" style={{ minWidth: 150 }} value={counter} aria-label="Counter"
+            <select className="select" style={{ flex: '1 1 150px', minWidth: 0 }} value={counter} aria-label="Counter"
               onChange={(e) => router.replace(`/scan?fest=${festId}&counter=${e.target.value}`)}>
               {counters.map((c) => <option key={c} value={c}>{COUNTER_LABEL[c]}</option>)}
             </select>

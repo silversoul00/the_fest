@@ -2,7 +2,7 @@ import 'server-only';
 import { sql } from './db';
 import type { Announcement, Fest, ScheduleEvent, Sponsor, TicketType, User } from './types';
 import { rolesReady } from './fest-access';
-import { ROLE_COUNTER, isRoleKey, type Counter } from './roles';
+import { ROLE_COUNTER, isRoleKey, scannerLabel, type Counter } from './roles';
 import { todayIST } from './format';
 
 export type FestListItem = Fest & { min_price: number | null; sold: number; quota: number };
@@ -105,4 +105,10 @@ export async function scannableFests(user: User): Promise<ScanFest[]> {
   return [...out.values()]
     .map((f) => ({ ...f, counters: f.manager ? order : order.filter((c) => f.counters.includes(c)) }))
     .filter((f) => f.manager || f.counters.length || f.shift_day);
+}
+
+/** The scanner link label for this person at this fest today ("Gate scanner", "Scanner"…), or null if they can't scan. */
+export async function scannerAt(user: User, festId: string): Promise<string | null> {
+  const f = (await scannableFests(user)).find((x) => x.id === festId);
+  return f && f.counters.length ? scannerLabel(f.counters) : null;
 }

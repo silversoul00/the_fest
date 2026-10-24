@@ -25,7 +25,7 @@ export const ROLE_LABEL: Record<RoleKey, string> = {
 
 /** One line under each role in the "Add to team" form. */
 export const ROLE_HINT: Record<RoleKey, string> = {
-  co_organizer: 'Runs the fest with you (everything except refunds, payout UPI ID and cancelling).',
+  co_organizer: 'Runs the fest with you (everything except refunds, adding Finance leads or co-organizers, payout UPI ID and cancelling).',
   event_head: 'Sees the overview and schedule of the fest.',
   judge: 'Listed on the team (judging comes with Competitions).',
   finance: 'Sales, payments, refunds, analytics and the CSV export.',
@@ -111,3 +111,7 @@ export const firstTab = (festId: string, perms: Set<Perm>) => {
 
 export const rolesLabel = (isOwner: boolean, roles: readonly string[]) =>
   isOwner ? 'Owner' : [...new Set(roles)].filter(isRoleKey).map((r) => ROLE_LABEL[r]).join(', ') || 'Team';
+
+/** Name of the scanner link for someone whose counters at a fest are `counters` (managers: every counter). */
+export const scannerLabel = (counters: readonly Counter[]) =>
+  counters.length === 1 ? `${{ gate: 'Gate', lunch: 'Lunch', stay: 'Stay' }[counters[0]]} scanner` : 'Scanner';

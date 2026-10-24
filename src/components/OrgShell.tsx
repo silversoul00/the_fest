@@ -5,9 +5,11 @@ import { TABS as ALL_TABS } from '@/lib/roles';
 
 export type OrgFestLink = { id: string; name: string };
 
-export function OrgShell({ festId, festName, slug, status, fests, userName, youAre, tabs, canCreate, isAdmin, logoutAction, badges = {}, children }: {
+export function OrgShell({ festId, festName, slug, status, fests, userName, youAre, tabs, canCreate, isAdmin, scanner, logoutAction, badges = {}, children }: {
   badges?: Record<string, number>; youAre: string; tabs: string[]; canCreate: boolean;
   festId: string; festName: string; slug: string; status: string; fests: OrgFestLink[]; userName: string; isAdmin?: boolean;
+  /** Scanner link label for this person's counter(s), or null if they can't scan here. */
+  scanner: string | null;
   logoutAction: () => Promise<void>; children: React.ReactNode;
 }) {
   const path = usePathname();
@@ -44,7 +46,7 @@ export function OrgShell({ festId, festName, slug, status, fests, userName, youA
           </>
         )}
         {canCreate && <Link href="/organizer/new" className="side-link"><span className="i">＋</span>New fest</Link>}
-        <Link href="/scan/login" className="side-link"><span className="i">📷</span>Gate scanner</Link>
+        {scanner && <Link href="/scan/login" className="side-link" data-scanner-link><span className="i">📷</span>{scanner}</Link>}
         {isAdmin && <Link href="/admin" className="side-link"><span className="i">🛡️</span>THE FEST admin</Link>}
         <div className="grow" />
         <div className="row g8" style={{ padding: '12px', borderTop: '1px solid var(--border)' }}>

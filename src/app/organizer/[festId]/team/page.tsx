@@ -30,10 +30,16 @@ export default async function Team({ params, searchParams }: {
   const canCoorg = access.perms.has('team_coorg');
   const today = todayIST();
 
-  // One card per person
+  // One card per person; the owner's own extra roles (e.g. a gate shift) go on the Owner card
+  const ownerEmail = owner.email.toLowerCase();
   const people = new Map<string, TeamRow[]>();
   for (const r of team) people.set(r.email, [...(people.get(r.email) ?? []), r]);
+  const ownerRows = people.get(ownerEmail) ?? [];
+  people.delete(ownerEmail);
   const list = [...people.entries()];
+  // Fest days for "Only on this day" (a list, so the field never shows a half-filled date)
+  const days: string[] = [];
+  for (let d = new Date(`${fest.starts_on}T00:00:00Z`); d <= new Date(`${fest.ends_on}T00:00:00Z`) && days.length < 31; d = new Date(d.getTime() + 864e5)) days.push(d.toISOString().slice(0, 10));
   const active = list.filter(([, rs]) => rs.some((r) => r.status === 'active')).length;
   const pending = list.filter(([, rs]) => rs.every((r) => r.status.startsWith('pending'))).length;
   const onDuty = list.filter(([, rs]) => rs.some((r) => r.checked_in_at && istDay(r.checked_in_at) === today)).length;
@@ -63,6 +69,42 @@ export default async function Team({ params, searchParams }: {
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   const logHref = (n: number) => `/organizer/${fest.id}/team?${new URLSearchParams({ ...(who ? { who } : {}), ...(type ? { type } : {}), ...(n > 1 ? { apage: String(n) } : {}) })}#activity`;
 
+
+  const roleRow = (r: TeamRow, email: string, who: string) => {
+    const mine = email === user.email.toLowerCase();
+    // Co-organizer and Finance lead roles, and the owner's own roles: only the owner removes them
+    const canRemove = canCoorg || (r.role !== 'co_organizer' && r.role !== 'finance' && email !== ownerEmail);
+    const pendingPerson = r.status === 'pending_account' || r.status === 'pending_confirm';
+    return (
+                  <div key={r.id} className="row wrap-row g8 small" data-role-row={r.role}>
+                    <span className="badge blue">{ROLE_LABEL[r.role]}</span>
+                    {r.scope_label && <span className="xs muted wrap-anywhere">for {r.scope_label}</span>}
+                    {r.scope_day && <span className="xs muted">on {dateRange(r.scope_day, r.scope_day)}</span>}
+                    {r.duty && <span className="xs muted wrap-anywhere">{r.duty}</span>}
+                    {VOLUNTEER_ROLES.includes(r.role) && r.can_scan && <span className="badge green">scanner</span>}
+                    <span className={`badge ${statusBadge[r.status]}`} data-status={r.status}>{STATUS_TEXT[r.status]}</span>
+                    <span className="grow" />
+                    {VOLUNTEER_ROLES.includes(r.role) && (!pendingPerson || r.checked_in_at) && (
+                      <form action={toggleCheckin}>
+                        <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={r.id} />
+                        <button className={`btn sm ${r.checked_in_at ? 'outline' : 'green'}`}>{r.checked_in_at ? `✓ In since ${time(r.checked_in_at)}` : 'Check in'}</button>
+                      </form>
+                    )}
+                    {mine && !canRemove ? (
+                      <form action={leaveRole}>
+                        <input type="hidden" name="id" value={r.id} /><input type="hidden" name="from" value="organizer" />
+                        <button className="btn sm outline">Leave</button>
+                      </form>
+                    ) : canRemove && (
+                      <form action={removeRole}>
+                        <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={r.id} />
+                        <button className="btn text xs" style={{ color: 'var(--red)' }} aria-label={`Remove ${ROLE_LABEL[r.role]} role of ${who}`}>Remove</button>
+                      </form>
+                    )}
+                  </div>
+    );
+  };
+
   return (
     <div className="stack g16">
       <h1 className="h2">Team</h1>
@@ -86,12 +128,17 @@ export default async function Team({ params, searchParams }: {
           </div>
           <label className="field"><span>Role</span>
             <select className="select" name="role" defaultValue="vol_gate" style={{ width: '100%' }}>
-              {ROLE_KEYS.filter((r) => r !== 'co_organizer' || canCoorg).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]} — {ROLE_HINT[r]}</option>)}
+              {ROLE_KEYS.filter((r) => canCoorg || (r !== 'co_organizer' && r !== 'finance')).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]} — {ROLE_HINT[r]}</option>)}
             </select>
           </label>
           <div className="form-row">
             <label className="field"><span>Only for (optional)</span><input className="input" name="scope_label" placeholder="e.g. Battle of Bands" maxLength={60} /></label>
-            <label className="field"><span>Only on this day (optional)</span><input className="input" type="date" name="scope_day" min={fest.starts_on} max={fest.ends_on} /></label>
+            <label className="field"><span>Only on this day (optional)</span>
+              <select className="select" name="scope_day" defaultValue="" style={{ width: '100%' }}>
+                <option value="">Every fest day</option>
+                {days.map((d) => <option key={d} value={d}>{dateRange(d, d)}</option>)}
+              </select>
+            </label>
           </div>
           <div className="form-row">
             <label className="field"><span>Desk name (volunteers)</span>
@@ -119,6 +166,7 @@ export default async function Team({ params, searchParams }: {
           <div className="grow" style={{ minWidth: 0 }}>
             <div className="wrap-anywhere">{owner.name} <span className="badge yellow" style={{ marginLeft: 4 }}>Owner</span></div>
             <div className="xs muted wrap-anywhere">{owner.email}</div>
+            {ownerRows.length > 0 && <div className="stack g8 mt8">{ownerRows.map((r) => roleRow(r, ownerEmail, owner.name))}</div>}
           </div>
         </div>
         {list.length === 0 && <Empty icon="👥" title="Just the owner so far" />}
@@ -128,38 +176,7 @@ export default async function Team({ params, searchParams }: {
             <div className="grow stack g8" style={{ minWidth: 0 }}>
               <div className="wrap-anywhere">{rs[0].name || <span className="muted">No name yet</span>}
                 <div className="xs muted wrap-anywhere">{email}{rs[0].scans ? ` · ${num(rs[0].scans)} scans` : ''}</div></div>
-              {rs.map((r) => {
-                const mine = email === user.email.toLowerCase();
-                const canRemove = r.role !== 'co_organizer' || canCoorg;
-                return (
-                  <div key={r.id} className="row wrap-row g8 small" data-role-row={r.role}>
-                    <span className="badge blue">{ROLE_LABEL[r.role]}</span>
-                    {r.scope_label && <span className="xs muted wrap-anywhere">for {r.scope_label}</span>}
-                    {r.scope_day && <span className="xs muted">on {dateRange(r.scope_day, r.scope_day)}</span>}
-                    {r.duty && <span className="xs muted wrap-anywhere">{r.duty}</span>}
-                    {VOLUNTEER_ROLES.includes(r.role) && r.can_scan && <span className="badge green">scanner</span>}
-                    <span className={`badge ${statusBadge[r.status]}`} data-status={r.status}>{STATUS_TEXT[r.status]}</span>
-                    <span className="grow" />
-                    {VOLUNTEER_ROLES.includes(r.role) && (
-                      <form action={toggleCheckin}>
-                        <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={r.id} />
-                        <button className={`btn sm ${r.checked_in_at ? 'outline' : 'green'}`}>{r.checked_in_at ? `✓ In since ${time(r.checked_in_at)}` : 'Check in'}</button>
-                      </form>
-                    )}
-                    {mine && !canRemove ? (
-                      <form action={leaveRole}>
-                        <input type="hidden" name="id" value={r.id} /><input type="hidden" name="from" value="organizer" />
-                        <button className="btn sm outline">Leave</button>
-                      </form>
-                    ) : canRemove && (
-                      <form action={removeRole}>
-                        <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="id" value={r.id} />
-                        <button className="btn text xs" style={{ color: 'var(--red)' }} aria-label={`Remove ${ROLE_LABEL[r.role]} role of ${rs[0].name || email}`}>Remove</button>
-                      </form>
-                    )}
-                  </div>
-                );
-              })}
+              {rs.map((r) => roleRow(r, email, rs[0].name || email))}
             </div>
           </div>
         ))}

@@ -33,7 +33,11 @@ function Card({ title, sub, children, table }: { title: string; sub?: string; ch
 }
 
 export default async function Analytics({ params }: { params: Promise<{ festId: string }> }) {
-  const { fest } = await pageAccess((await params).festId, 'analytics');
+  const { fest, access } = await pageAccess((await params).festId, 'analytics');
+  // Sponsorship and Media leads see tickets and footfall only — no ₹ (Harshith, Oct 24 2026)
+  const money = access.perms.has('money');
+  const canExport = access.perms.has('export');
+  const canSales = access.perms.has('sales') && money;
   const a = await festAnalytics(fest.id);
   const t = a.totals;
   const capacity = t.capacity && t.capacity > 0 ? t.capacity : t.quota;
@@ -70,17 +74,18 @@ export default async function Analytics({ params }: { params: Promise<{ festId: 
           <h1 className="h2">Analytics</h1>
           <p className="xs muted mt8">All times IST · updated when you open this page</p>
         </div>
-        <a className="btn sm outline" href={`/organizer/${fest.id}/export`}>Download attendee CSV</a>
+        {canExport && <a className="btn sm outline" href={`/organizer/${fest.id}/export`}>Download attendee CSV</a>}
       </div>
 
       <div className="kpi-grid">
         <Stat label="Tickets sold" value={num(t.tickets)} sub={capacity ? `${pct(t.tickets, capacity)}% of ${num(capacity)} capacity` : `${num(t.orders)} orders`} />
-        <Stat label="Your revenue" value={rupees(t.net, { compact: true })} sub={`after fees · ${rupees(t.gross, { compact: true })} collected`} color="var(--green)" />
+        {money ? <Stat label="Your revenue" value={rupees(t.net, { compact: true })} sub={`after fees · ${rupees(t.gross, { compact: true })} collected`} color="var(--green)" />
+          : <Stat label="Orders" value={num(t.orders)} sub="paid orders" color="var(--green)" />}
         <Stat
           label="Showed up" value={t.started ? `${pct(t.used, t.tickets)}%` : '—'} color="var(--blue)"
           sub={t.started ? `${num(t.used)} in · ${num(noShows)} no-shows` : 'shows once the fest starts'}
         />
-        <Stat label="Per order" value={t.orders ? (t.tickets / t.orders).toFixed(1) : '—'} sub={t.refund_orders ? `${t.refund_orders} refunded · ${rupees(t.refunded, { compact: true })}` : 'tickets per purchase'} color="var(--orange)" />
+        <Stat label="Per order" value={t.orders ? (t.tickets / t.orders).toFixed(1) : '—'} sub={money && t.refund_orders ? `${t.refund_orders} refunded · ${rupees(t.refunded, { compact: true })}` : 'tickets per purchase'} color="var(--orange)" />
       </div>
 
       <div className="an-grid two">
@@ -97,17 +102,17 @@ export default async function Analytics({ params }: { params: Promise<{ festId: 
 
         <Card
           title="Ticket types"
-          sub="Sold against each type's limit. Tap or hover a row for what it brought in."
+          sub={money ? "Sold against each type's limit. Tap or hover a row for what it brought in." : "Sold against each type's limit."}
           table={
-            <table className="viz-table"><thead><tr><th>Type</th><th className="n">Price</th><th className="n">Sold</th><th className="n">Limit</th><th className="n">Collected</th></tr></thead>
-              <tbody>{a.types.map((ty) => <tr key={ty.name}><td>{ty.name}{!ty.active && <span className="muted"> (off)</span>}</td><td className="n">{rupees(ty.price)}</td><td className="n">{num(ty.sold)}</td><td className="n">{num(ty.quota)}</td><td className="n">{rupees(ty.revenue)}</td></tr>)}</tbody></table>
+            <table className="viz-table"><thead><tr><th>Type</th>{money && <th className="n">Price</th>}<th className="n">Sold</th><th className="n">Limit</th>{money && <th className="n">Collected</th>}</tr></thead>
+              <tbody>{a.types.map((ty) => <tr key={ty.name}><td>{ty.name}{!ty.active && <span className="muted"> (off)</span>}</td>{money && <td className="n">{rupees(ty.price)}</td>}<td className="n">{num(ty.sold)}</td><td className="n">{num(ty.quota)}</td>{money && <td className="n">{rupees(ty.revenue)}</td>}</tr>)}</tbody></table>
           }
         >
           <BarList
             unit="sold"
             rows={a.types.map((ty) => ({
-              key: ty.name, label: `${ty.name}${ty.price ? ` · ${rupees(ty.price)}` : ' · Free'}`, value: ty.sold, of: ty.quota,
-              note: `${pct(ty.sold, ty.quota)}% sold · ${rupees(ty.revenue)} collected${t.started ? ` · ${pct(ty.used, ty.sold)}% showed up` : ''}`,
+              key: ty.name, label: money ? `${ty.name}${ty.price ? ` · ${rupees(ty.price)}` : ' · Free'}` : ty.name, value: ty.sold, of: ty.quota,
+              note: `${pct(ty.sold, ty.quota)}% sold${money ? ` · ${rupees(ty.revenue)} collected` : ''}${t.started ? ` · ${pct(ty.used, ty.sold)}% showed up` : ''}`,
             }))}
           />
         </Card>
@@ -161,14 +166,14 @@ export default async function Analytics({ params }: { params: Promise<{ festId: 
           title="How people paid"
           sub="Zero-fee UPI saves students the payment charges."
           table={
-            <table className="viz-table"><thead><tr><th>Method</th><th className="n">Orders</th><th className="n">Tickets</th><th className="n">Collected</th></tr></thead>
-              <tbody>{a.methods.map((m) => <tr key={m.method}><td>{METHOD[m.method] ?? m.method}</td><td className="n">{num(m.orders)}</td><td className="n">{num(m.tickets)}</td><td className="n">{rupees(m.amount)}</td></tr>)}</tbody></table>
+            <table className="viz-table"><thead><tr><th>Method</th><th className="n">Orders</th><th className="n">Tickets</th>{money && <th className="n">Collected</th>}</tr></thead>
+              <tbody>{a.methods.map((m) => <tr key={m.method}><td>{METHOD[m.method] ?? m.method}</td><td className="n">{num(m.orders)}</td><td className="n">{num(m.tickets)}</td>{money && <td className="n">{rupees(m.amount)}</td>}</tr>)}</tbody></table>
           }
         >
           {a.methods.length > 1
-            ? <BarList unit="tickets" rows={a.methods.map((m) => ({ key: m.method, label: METHOD[m.method] ?? m.method, value: m.tickets, note: `${pct(m.tickets, ticketsTotal)}% of tickets · ${rupees(m.amount)} collected` }))} />
+            ? <BarList unit="tickets" rows={a.methods.map((m) => ({ key: m.method, label: METHOD[m.method] ?? m.method, value: m.tickets, note: `${pct(m.tickets, ticketsTotal)}% of tickets${money ? ` · ${rupees(m.amount)} collected` : ''}` }))} />
             : a.methods[0]
-              ? <p className="small soft">All {num(a.methods[0].tickets)} tickets were bought through <b>{METHOD[a.methods[0].method] ?? a.methods[0].method}</b> ({rupees(a.methods[0].amount)} collected).{a.methods[0].method === 'gateway' ? ' Turn on zero-fee UPI in Payments to save students the payment charges.' : ''}</p>
+              ? <p className="small soft">All {num(a.methods[0].tickets)} tickets were bought through <b>{METHOD[a.methods[0].method] ?? a.methods[0].method}</b>{money && <> ({rupees(a.methods[0].amount)} collected)</>}.{access.perms.has('payments') && a.methods[0].method === 'gateway' ? ' Turn on zero-fee UPI in Payments to save students the payment charges.' : ''}</p>
               : <p className="small muted">No payments yet.</p>}
         </Card>
 
@@ -182,7 +187,9 @@ export default async function Analytics({ params }: { params: Promise<{ festId: 
         </Card>
       </div>
 
-      <p className="xs muted">Need the raw data? <Link className="accent" href={`/organizer/${fest.id}/sales`}>Sales</Link> lists every order, and the CSV has every ticket.</p>
+      {(canSales || canExport) && (
+        <p className="xs muted">Need the raw data?{canSales && <> <Link className="accent" href={`/organizer/${fest.id}/sales`}>Sales</Link> lists every order{canExport ? ',' : '.'}</>}{canExport && <> {canSales ? 'and the' : 'The'} CSV has every ticket.</>}</p>
+      )}
     </div>
   );
 }

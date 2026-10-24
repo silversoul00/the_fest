@@ -69,6 +69,8 @@ try {
   const admin = await mkUser('admin@thefest.in', 'THE FEST Admin', 'organizer');
   await mkUser('lunch@seed.thefest.in', 'Lata Lunch', 'student', COLLEGES[0]);
   await mkUser('stay@seed.thefest.in', 'Sunil Stay', 'student', COLLEGES[0]);
+  // Every seeded role holder can log in (password123, email confirmed) — only newvolunteer@ stays "no account yet"
+  for (const [e, n] of [['gate2@seed.thefest.in', 'Manoj Gate'], ['gate3@seed.thefest.in', 'Priya Gate'], ['desk@seed.thefest.in', 'Lakshmi Desk'], ['stage@seed.thefest.in', 'Rahul Stage']]) await mkUser(e, n, 'student', COLLEGES[0]);
   await sql`update users set is_admin = true where id = ${admin}`;
 
   // ~120 attendees

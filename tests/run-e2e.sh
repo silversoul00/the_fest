@@ -92,4 +92,8 @@ python3 tests/bugfix_oct23_fix2.py
 # cuts access + scanner sessions, co-organizer rules, duplicates/days, scanner counters, activity log, /me roles, 390px,
 # migration of co-organizers/volunteers (run twice)
 python3 tests/team_roles.py
+# Team & Roles fix round 1 (2026-10-24-team-roles-review-1 / -test-1): only the owner makes a Finance lead, nobody adds
+# a role to themselves, no ₹ for non-money roles, scanner link per counter, 390px scanner header, owner card, pending
+# check-in, seeded role accounts, demo seed loads on a fresh database
+python3 tests/team_roles_fix1.py
 echo "✓ Release check passed"

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { pageAccess, rolesReady } from '@/lib/fest-access';
 import { sql } from '@/lib/db';
-import { festStats } from '@/lib/queries';
+import { festStats, scannerAt } from '@/lib/queries';
 import { ago, num, rupees, time } from '@/lib/format';
 import { Stat } from '@/components/ui';
 import { AutoRefresh } from '@/components/AutoRefresh';
@@ -11,7 +11,8 @@ import { isRenameNote } from '@/lib/fest-form';
 export default async function Overview({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ created?: string }> }) {
   const { festId } = await params;
   const { created } = await searchParams;
-  const { fest, access } = await pageAccess(festId, 'overview');
+  const { user, fest, access } = await pageAccess(festId, 'overview');
+  const scanner = await scannerAt(user, fest.id);
   const money = access.perms.has('money');
   const canPublish = access.perms.has('fest');
 
@@ -128,7 +129,7 @@ export default async function Overview({ params, searchParams }: { params: Promi
       <div className="card">
         <div className="card-head">
           <span className="label">Latest gate scans</span>
-          <Link href="/scan/login" className="xs c-green">Open scanner →</Link>
+          {scanner && <Link href="/scan/login" className="xs c-green" data-scanner-link>Open {scanner.toLowerCase()} →</Link>}
         </div>
         {recent.length === 0 ? <p className="small muted">No scans yet. Add volunteers, then open the scanner on fest day.</p> : (
           <div className="stack">

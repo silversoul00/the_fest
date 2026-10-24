@@ -105,6 +105,11 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   4. Add the v2.7 tables (`fest_roles`, `fest_activity`) to **both** Supabase databases after the tests pass (the
      coordinator does it, not the builder).
   Earlier rules stay (e.g. every rename of an approved fest → admin review).
+  Review-1 answers (Oct 24, 2026):
+  5. **Only the OWNER can make someone a Finance lead** (co-organizers can't — Finance can refund). Nobody can add a role
+     to their own email.
+  6. **Sponsorship lead and Media / PR must NOT see ₹ revenue anywhere** (Analytics included) — tickets and footfall
+     only. (Sponsorship deal amounts on the Sponsors tab are their own work and stay visible to the Sponsorship lead.)
 - Organizer "Must" list (proposed): Competitions, Digital certificates, Quick setup / copy last year, Volunteer shifts.
   Should: committee budget, vendor marketplace (certificate makers, medal makers, canopy etc.), feedback/polls, crowd view.
 

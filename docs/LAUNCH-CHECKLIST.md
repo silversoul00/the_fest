@@ -57,6 +57,33 @@ alter table perk_redemptions enable row level security;
 ```
 (Running all of `db/schema.sql` does the same — it only adds what's missing.)
 
+**2a-v2.7. Team & Roles update (v2.7, Oct 2026) — apply it at the same time as you deploy the new code.**
+The new code reads team roles only from the new `fest_roles` table. If the code goes live first, every co-organizer and
+volunteer is locked out (only owners get in) until the update runs. If the update runs long before the code, anyone the
+old code adds in between is never copied into `fest_roles`.
+1. Have the new deploy ready (Vercel build finished, not yet promoted — or deploy right after this step).
+2. Supabase → **SQL Editor** → run all of `db/schema.sql` (it only adds what's missing, and copies old co-organizers and
+   volunteers into `fest_roles` once). Then promote / deploy the new code straight away.
+3. Check the role counts — the two numbers on each line should match:
+```sql
+select (select count(*) from fest_members) as old_coorgs,
+       (select count(*) from fest_roles where role = 'co_organizer') as new_coorgs,
+       (select count(*) from fest_staff) as old_volunteers,
+       (select count(*) from fest_roles where role in ('vol_gate', 'vol_lunch', 'vol_stay')) as new_volunteers;
+```
+4. If a "new" number is lower (someone was added by the old code after step 2), run these two lines once — they skip
+   anyone already copied:
+```sql
+insert into fest_roles (fest_id, email, role, added_by, created_at)
+  select fest_id, email, 'co_organizer', added_by, created_at from fest_members on conflict do nothing;
+insert into fest_roles (fest_id, email, name, role, duty, can_scan, checked_in_at, created_at)
+  select fest_id, email, name, case when lower(trim(duty)) like 'lunch%' then 'vol_lunch'
+    when lower(trim(duty)) like 'stay%' or lower(trim(duty)) like 'hostel%' then 'vol_stay' else 'vol_gate' end,
+    duty, can_scan, checked_in_at, created_at from fest_staff on conflict do nothing;
+```
+   (Only do this right after go-live: later it would bring back roles an organizer has removed since.)
+5. Do the same on `thefest-preview` with its own deploy.
+
 **2b. Copy the connection string (`DATABASE_URL`)**
 1. In the project, tap the **Connect** button at the top of the page.
 2. Choose the **Connection string** tab, then **Transaction pooler** (port **6543**). Copy the URI.
