@@ -1,0 +1,140 @@
+import { pageAccess } from '@/lib/fest-access';
+import { sql } from '@/lib/db';
+import Link from 'next/link';
+import { dayLabel, num, rupees, time } from '@/lib/format';
+import { Empty, Stat } from '@/components/ui';
+import { ActionForm, Submit } from '@/components/forms';
+import { markUpiRefundSent, refundOrderAction } from '../../actions';
+
+const PER_PAGE = 50;
+
+export default async function Sales({ params, searchParams }: { params: Promise<{ festId: string }>; searchParams: Promise<{ q?: string; page?: string }> }) {
+  const { fest, access } = await pageAccess((await params).festId, 'sales');
+  // Desk volunteers look attendees up (name, email, ticket code) — no money figures, no refunds
+  const money = access.perms.has('money');
+  const canRefund = access.perms.has('refund');
+  const { q = '', page: rawPage } = await searchParams;
+  const like = q.trim() ? `%${q.trim()}%` : null;
+  const asked = Math.min(1000, Math.max(1, Math.floor(Number(rawPage) || 1)));
+  const match = sql`o.fest_id = ${fest.id} and o.status in ('paid', 'refunded')
+        ${like ? sql`and (u.name ilike ${like} or u.email ilike ${like} or u.college ilike ${like}
+                          or exists (select 1 from tickets t where t.order_id = o.id and t.code ilike ${like}))` : sql``}`;
+
+  const [byType, toSend, [{ total }]] = await Promise.all([
+    sql<{ name: string; qty: number; gross: number; fees: number }[]>`
+      select tt.name, (case when tt.kind = 'addon' then (select count(*) from orders a where a.ticket_type_id = tt.id and a.status = 'paid')
+                            else (select count(*) from tickets t where t.ticket_type_id = tt.id and t.status <> 'void') end)::int qty,
+             coalesce(sum(o.amount_paise - o.refunded_paise), 0)::int gross, coalesce(sum(o.platform_fee_paise + o.gateway_fee_paise), 0)::int fees
+      from ticket_types tt left join orders o on o.ticket_type_id = tt.id and o.status in ('paid', 'refunded')
+      where tt.fest_id = ${fest.id} group by tt.id, tt.name, tt.sort order by tt.sort`,
+    // Bank-UPI money to send back: refunds, and payments that arrived too late to become tickets
+    sql<{ id: string; name: string; email: string; utr: string | null; refunded_paise: number }[]>`
+      select o.id, u.name, u.email::text, o.utr, o.refunded_paise
+      from orders o join users u on u.id = o.user_id
+      where o.fest_id = ${fest.id} and o.refund_status = 'manual_pending' order by o.refunded_at`,
+    sql<{ total: number }[]>`select count(*)::int as total from orders o join users u on u.id = o.user_id where ${match}`,
+  ]);
+  const pages = Math.max(1, Math.ceil(total / PER_PAGE));
+  // A page number past the end (an old link, a typed URL) shows the last real page
+  const page = Math.min(asked, pages);
+  const orders = await sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string; codes: string | null }[]>`
+      select o.id, o.paid_at as created_at, o.qty, o.amount_paise, o.platform_fee_paise, o.provider, o.status, o.refunded_paise, o.refund_status, o.utr,
+             case when o.addon_for is not null then (o.status = 'paid')::int
+                  else (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int end as unused,
+             u.name, u.email::text, u.college, tt.name as type,
+             (select string_agg(t.code, ' ' order by t.code) from tickets t where t.order_id = o.id and t.status <> 'void') as codes
+      from orders o join users u on u.id = o.user_id join ticket_types tt on tt.id = o.ticket_type_id
+      where ${match}
+      order by o.paid_at desc, o.id limit ${PER_PAGE} offset ${(page - 1) * PER_PAGE}`;
+  const pageHref = (n: number) => `/organizer/${fest.id}/sales?${new URLSearchParams({ ...(q ? { q } : {}), ...(n > 1 ? { page: String(n) } : {}) })}`;
+
+  const totals = byType.reduce((a, t) => ({ qty: a.qty + t.qty, gross: a.gross + t.gross, fees: a.fees + t.fees }), { qty: 0, gross: 0, fees: 0 });
+
+  return (
+    <div className="stack g16">
+      <div className="row between wrap-row g8">
+        <h1 className="h2">Sales</h1>
+        {access.perms.has('export') && <a className="btn sm outline" href={`/organizer/${fest.id}/export`} download>⬇ Export CSV</a>}
+      </div>
+
+      {money && <><div className="grid-2 grid-3">
+        <Stat label="Tickets" value={num(totals.qty)} />
+        <Stat label="Collected" value={rupees(totals.gross, { compact: true })} color="var(--blue)" sub="incl. convenience fees" />
+        <Stat label="Your payout" value={rupees(totals.gross - totals.fees, { compact: true })} color="var(--green)" sub={`${rupees(totals.fees, { compact: true })} fees & payment charges`} />
+      </div>
+
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>Ticket type</th><th className="num">Sold</th><th className="num">Collected</th><th className="num">Payout</th></tr></thead>
+          <tbody>
+            {byType.map((t) => (
+              <tr key={t.name}><td>{t.name}</td><td className="num">{num(t.qty)}</td><td className="num">{rupees(t.gross)}</td><td className="num c-green">{rupees(t.gross - t.fees)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div></>}
+
+      {money && toSend.length > 0 && (
+        <div className="card stack g8" style={{ borderColor: 'rgba(56,189,248,.35)' }}>
+          <div className="h3">UPI refunds to send</div>
+          <p className="xs muted">These students paid your fest’s UPI directly. Send the amount back from your bank app (to the UPI ID that paid, found by its UTR), then mark it sent.</p>
+          {toSend.map((o) => (
+            <div key={o.id} className="row wrap-row g12 small">
+              <span className="grow">{o.name} · {o.email} · UTR <span className="mono">{o.utr ?? '—'}</span></span>
+              <span className="mono">{rupees(o.refunded_paise)}</span>
+              {canRefund && <form action={markUpiRefundSent}><input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="orderId" value={o.id} /><button className="btn sm blue">Mark sent</button></form>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <form className="row g8" role="search">
+        <input className="input grow" type="search" name="q" defaultValue={q} placeholder="Search buyer, email, college, ticket code" />
+        <button className="btn" type="submit">Search</button>
+      </form>
+
+      {orders.length === 0 ? <Empty icon="💸" title={q ? 'No matching orders' : 'No sales yet'}>{q ? '' : 'Share your fest link to start selling.'}</Empty> : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Buyer</th><th>Ticket</th><th className="num">Qty</th>{money && <th className="num">Amount</th>}<th>When</th><th></th></tr></thead>
+            <tbody>
+              {orders.map((o) => (
+                <tr key={o.id}>
+                  <td><div>{o.name}</div><div className="xs muted">{o.email}{o.college ? ` · ${o.college}` : ''}</div></td>
+                  <td className="small">{o.type}{o.provider === 'demo' && <span className="badge gray" style={{ marginLeft: 6 }}>demo</span>}{o.codes && <div className="xs muted mono wrap-anywhere">{o.codes}</div>}</td>
+                  <td className="num">{o.qty}</td>
+                  {money && <td className="num">{rupees(o.amount_paise)}{o.refunded_paise > 0 && <div className="xs c-orange">−{rupees(o.refunded_paise)} refunded</div>}</td>}
+                  {/* A fixed IST date and time (not "5m ago"): the same text on every render, whatever the clock or the browser */}
+                  <td className="xs muted" style={{ whiteSpace: 'nowrap' }}>{o.created_at ? `${dayLabel(o.created_at)}, ${time(o.created_at)}` : '—'}</td>
+                  <td style={{ minWidth: 120 }}>
+                    {o.status === 'refunded' ? <span className="badge orange">Refunded</span> : !canRefund ? null : o.unused > 0 ? (
+                      <details>
+                        <summary className="xs c-red" style={{ cursor: 'pointer' }}>Cancel / refund</summary>
+                        <ActionForm action={refundOrderAction} className="form mt8">
+                          <input type="hidden" name="festId" value={fest.id} />
+                          <input type="hidden" name="orderId" value={o.id} />
+                          <label className="field"><span>Tickets to cancel (of {o.unused} unused)</span>
+                            <input className="input" type="number" name="tickets" min={1} max={o.unused} defaultValue={o.unused} /></label>
+                          <label className="field"><span>Reason (student sees this)</span><input className="input" name="reason" placeholder="Requested by student" /></label>
+                          <Submit className="btn sm danger">Cancel &amp; refund</Submit>
+                          {o.provider === 'upi_direct' && <p className="xs muted">Paid by bank UPI — you’ll send the money back yourself.</p>}
+                        </ActionForm>
+                      </details>
+                    ) : <span className="xs muted">All used</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {total > PER_PAGE && (
+        <nav className="row between g8 small" aria-label="Pages">
+          {page > 1 ? <Link className="btn sm outline" href={pageHref(page - 1)}>← Newer</Link> : <span />}
+          <span className="muted">Orders {num((page - 1) * PER_PAGE + 1)}–{num(Math.min(total, page * PER_PAGE))} of {num(total)} · page {page} of {pages}</span>
+          {page < pages ? <Link className="btn sm outline" href={pageHref(page + 1)}>Older →</Link> : <span />}
+        </nav>
+      )}
+    </div>
+  );
+}
