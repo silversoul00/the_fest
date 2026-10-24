@@ -107,7 +107,7 @@ export default async function AdminHome() {
           {f.description && <p className="small soft" style={{ whiteSpace: 'pre-line' }}>{cutText(f.description, 400)}</p>}
           <p className="xs muted">Check before approving: the college and dates are real (search the fest name, check the college’s Instagram), the organizer can be reached, prices look normal.</p>
           <div className="row g12 wrap-row" style={{ alignItems: 'flex-start' }}>
-            <form action={approveFest}><input type="hidden" name="festId" value={f.id} /><button className="btn green">Approve — go live</button></form>
+            <form action={approveFest}><input type="hidden" name="festId" value={f.id} /><input type="hidden" name="name" value={f.name} /><button className="btn green">Approve — go live</button></form>
             <div className="grow" style={{ minWidth: 260 }}>
               <ActionForm action={sendBackFest} className="row g8">
                 <input type="hidden" name="festId" value={f.id} />

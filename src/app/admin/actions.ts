@@ -25,7 +25,11 @@ export async function approveFest(fd: FormData) {
   const admin = await requireAdmin();
   const f = await festFrom(fd);
   if (f.status !== 'review') return;
-  await sql`update fests set status = 'live', approved_at = now(), approved_by = ${admin.id}, review_note = null where id = ${f.id}`;
+  // Approve only the name the admin actually saw: if the organizer renamed it meanwhile, nothing changes (reload shows it)
+  const seen = s(fd, 'name');
+  const done = await sql`update fests set status = 'live', approved_at = now(), approved_by = ${admin.id}, review_note = null
+    where id = ${f.id} and status = 'review' and name = ${seen} returning id`;
+  if (!done.length) { revalidatePath('/admin', 'layout'); return; }
   await afterResponse('fest approved email', () => sendEmail(f.email, `${f.name} is live on THE FEST 🎉`, `Your fest has been approved and tickets are on sale now.\n\nManage it: ${site()}/organizer/${f.id}\n\n— THE FEST`));
   revalidatePath('/admin', 'layout');
 }

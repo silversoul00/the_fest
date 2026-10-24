@@ -210,20 +210,20 @@ export async function setFestStatus(fd: FormData) {
   const { fest } = await ownFest(fd);
   const status = s(fd, 'status');
   if (!['draft', 'live', 'ended'].includes(status)) return;
-  const [cur] = await sql<{ status: string; approved_at: Date | null }[]>`select status, approved_at from fests where id = ${fest.id}`;
-  if (cur.status === 'cancelled') return; // cancelled fests stay cancelled
-  let next = status;
   if (status === 'live') {
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active`;
     if (!n) return; // UI prevents this; nothing to sell
-    // New fests — and fests renamed since THE FEST approved them (updateFest clears approved_at) — are checked by
-    // THE FEST before tickets go on sale. Publish, Submit and Reopen all come through here.
-    if (!cur.approved_at && approvalRequired()) next = 'review';
   }
-  // Going to review clears an old "sent back" note, but never a rename note: the admin must see what the fest was called
-  await sql`update fests set status = ${next}::fest_status,
-              review_note = case when ${next} = 'review' and coalesce(review_note, '') not like ${'Renamed from “%'} then null else review_note end
-            where id = ${fest.id}`;
+  // New fests — and fests renamed since THE FEST approved them (updateFest clears approved_at) — are checked by
+  // THE FEST before tickets go on sale. Publish, Submit and Reopen all come through here. The review-or-live choice is
+  // made inside this one UPDATE, so a rename saved at the same moment can't slip past review.
+  // Going to review clears an old "sent back" note, but never a rename note: the admin must see what the fest was called.
+  const needs = approvalRequired();
+  await sql`update fests set
+              status = (case when ${status} = 'live' and approved_at is null and ${needs} then 'review' else ${status} end)::fest_status,
+              review_note = case when ${status} = 'live' and approved_at is null and ${needs}
+                                  and coalesce(review_note, '') not like ${'Renamed from “%'} then null else review_note end
+            where id = ${fest.id} and status <> 'cancelled'`; // cancelled fests stay cancelled
   refresh(fest.id);
 }
 
