@@ -40,6 +40,19 @@ export async function sendEmail(to: string, subject: string, text: string, opts:
 }
 
 export async function notifyOrderPaid(orderId: string) {
+  // v2.8: a paid event entry is not a ticket — say the team is in
+  const [ev] = await sql<{ email: string; name: string; fest: string; title: string; amount_paise: number }[]>`
+    select u.email::text, u.name, f.name as fest, e.title, o.amount_paise
+    from orders o join users u on u.id = o.user_id join fests f on f.id = o.fest_id join events e on e.ticket_type_id = o.ticket_type_id
+    where o.id = ${orderId} and o.status = 'paid' and to_regclass('public.events') is not null`.catch(() => []);
+  if (ev) {
+    await sendEmail(ev.email, `You’re registered for ${ev.title} 🏆`, [
+      `Hi ${ev.name.split(' ')[0]},`, '',
+      `Your entry for ${ev.title} at ${ev.fest} is confirmed (paid ${rupees(ev.amount_paise)}).`, '',
+      `See your team: ${site()}/my-events`, '', '— THE FEST',
+    ].join('\n'));
+    return;
+  }
   const [o] = await sql<{ email: string; name: string; fest: string; qty: number; amount_paise: number; type: string; starts_on: string }[]>`
     select u.email::text, u.name, f.name as fest, o.qty, o.amount_paise, tt.name as type, f.starts_on
     from orders o join users u on u.id = o.user_id join fests f on f.id = o.fest_id join ticket_types tt on tt.id = o.ticket_type_id

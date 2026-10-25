@@ -1,7 +1,7 @@
 import 'server-only';
 import { sql } from './db';
 import type { Announcement, Fest, ScheduleEvent, Sponsor, TicketType, User } from './types';
-import { rolesReady } from './fest-access';
+import { eventsReady, rolesReady } from './fest-access';
 import { ROLE_COUNTER, isRoleKey, scannerLabel, type Counter } from './roles';
 import { todayIST } from './format';
 
@@ -54,8 +54,8 @@ export async function festStats(festId: string) {
       -- revenue = what the organizer earns (collected minus THE FEST fee)
       (select coalesce(sum(amount_paise - refunded_paise - platform_fee_paise - gateway_fee_paise), 0) from orders where fest_id = ${festId} and status in ('paid', 'refunded'))::bigint::int as revenue,
       (select coalesce(sum(platform_fee_paise), 0) from orders where fest_id = ${festId} and status = 'paid')::int as fees,
-      (select count(*) from orders where fest_id = ${festId} and status = 'paid')::int as orders,
-      (select coalesce(sum(qty), 0) from orders where fest_id = ${festId} and status = 'paid' and paid_at > now() - interval '24 hours')::int as sold_today,
+      (select count(*) from orders where fest_id = ${festId} and status = 'paid' and not exists (select 1 from ticket_types x where x.id = ticket_type_id and x.kind = 'event'))::int as orders,
+      (select coalesce(sum(qty), 0) from orders where fest_id = ${festId} and status = 'paid' and paid_at > now() - interval '24 hours' and not exists (select 1 from ticket_types x where x.id = ticket_type_id and x.kind = 'event'))::int as sold_today,
       (select count(*) from scans where fest_id = ${festId} and result = 'admitted' and created_at > now() - interval '1 hour')::int as scans_hour,
       (select count(*) from scans where fest_id = ${festId} and result <> 'admitted')::int as blocked,
       (select coalesce(sum(quota), 0) from ticket_types where fest_id = ${festId} and kind = 'entry')::int as quota`;
@@ -101,7 +101,8 @@ export async function scannableFests(user: User): Promise<ScanFest[]> {
     }
     out.set(f.id, cur);
   }
-  const order: Counter[] = ['gate', 'lunch', 'stay'];
+  // v2.8: the Event counter (event heads; managers too) only once the events tables exist
+  const order: Counter[] = (await eventsReady()) ? ['gate', 'lunch', 'stay', 'event'] : ['gate', 'lunch', 'stay'];
   return [...out.values()]
     .map((f) => ({ ...f, counters: f.manager ? order : order.filter((c) => f.counters.includes(c)) }))
     .filter((f) => f.manager || f.counters.length || f.shift_day);

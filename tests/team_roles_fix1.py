@@ -104,9 +104,11 @@ async def main():
         async def scan_links(pg):
             await pg.goto(f'{B}/organizer/{NEON}/no-access')
             return [' '.join(x.split()).replace('📷 ', '').lower() for x in await pg.locator('[data-scanner-link]').all_inner_texts()]
-        for k, pg in [('finance', fpg), ('sponsorship', ctx['sponsorship'][1]), ('media', ctx['media'][1]), ('event_head', ctx['event_head'][1])]:
+        for k, pg in [('finance', fpg), ('sponsorship', ctx['sponsorship'][1]), ('media', ctx['media'][1])]:
             got = await scan_links(pg)
             check(f'F2 {k}: no scanner link in the sidebar or on the no-access page', got == [], got)
+        got = await scan_links(ctx['event_head'][1])   # v2.8 (Oct 25): event heads work the Event counter
+        check('F2 event_head: "Event scanner"', got == ['event scanner', 'open event scanner'], got)
         got = await scan_links(ctx['desk'][1])
         check('F2 desk volunteer: "Gate scanner"', got == ['gate scanner', 'open gate scanner'], got)
         lc, lp = await login(b, 'lunch@seed.thefest.in')

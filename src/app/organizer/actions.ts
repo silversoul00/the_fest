@@ -9,7 +9,7 @@ import { cancelFest, refundOrder } from '@/lib/refunds';
 import { OrderError } from '@/lib/orders';
 import { boothCode } from '@/lib/ticket-crypto';
 import { isUuid } from '@/lib/http';
-import { actorOf, logActivity, requirePerm, requireOwnRole, rolesReady, ROLES_MISSING } from '@/lib/fest-access';
+import { actorOf, eventsReady, logActivity, requirePerm, requireOwnRole, rolesReady, ROLES_MISSING } from '@/lib/fest-access';
 import { ROLE_LABEL, VOLUNTEER_ROLES, isRoleKey } from '@/lib/roles';
 import { leadsReady } from '@/lib/sponsor-leads';
 import { siteUrl } from '@/lib/env';
@@ -203,7 +203,7 @@ export async function setFestStatus(fd: FormData) {
   const status = s(fd, 'status');
   if (!['draft', 'live', 'ended'].includes(status)) return;
   if (status === 'live') {
-    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active`;
+    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active and kind <> 'event'`;
     if (!n) return; // UI prevents this; nothing to sell
   }
   // New fests — and fests renamed since THE FEST approved them (updateFest clears approved_at) — are checked by
@@ -262,7 +262,7 @@ export async function updateTicketType(_: ActionState, fd: FormData): Promise<Ac
   const id = s(fd, 'id');
   const [t] = await sql<{ sold: number; kind: string; orders: number }[]>`
     select sold, kind, (select count(*) from orders o where o.ticket_type_id = tt.id)::int as orders
-    from ticket_types tt where id = ${id} and fest_id = ${fest.id}`;
+    from ticket_types tt where id = ${id} and fest_id = ${fest.id} and kind <> 'event'`;  // event slot counters are edited on the Events tab
   if (!t) return { error: 'Ticket type not found' };
   if (p.data.quota < t.sold) return { error: `Already ${t.sold} sold — quantity can't go below that.` };
   const perks = perksFrom(fd, fest);
@@ -284,7 +284,7 @@ export async function toggleTicketType(fd: FormData) {
   const g = await requirePerm(fd, 'fest');
   const { fest } = g;
   const [t] = await sql<{ name: string; active: boolean }[]>`
-    update ticket_types set active = not active where id = ${s(fd, 'id')} and fest_id = ${fest.id} returning name, active`;
+    update ticket_types set active = not active where id = ${s(fd, 'id')} and fest_id = ${fest.id} and kind <> 'event' returning name, active`;
   if (t) await log(g, 'ticket.toggle', `${t.active ? 'Turned on' : 'Turned off'} ticket type ${t.name}`);
   refresh(fest.id);
 }
@@ -325,7 +325,7 @@ async function endScannerIfNoScanRole(festId: string, email: string) {
             where s.user_id = u.id and s.kind = 'scanner' and u.email = ${email}
               and u.id <> (select organizer_id from fests where id = ${festId})
               and not exists (select 1 from fest_roles r where r.fest_id = ${festId} and r.email = ${email}
-                                and (r.role = 'co_organizer' or (r.can_scan and r.role in ('vol_gate', 'vol_lunch', 'vol_stay', 'desk'))))`;
+                                and (r.role = 'co_organizer' or (r.can_scan and r.role in ('vol_gate', 'vol_lunch', 'vol_stay', 'desk', 'event_head'))))`;
 }
 
 /**
@@ -345,7 +345,17 @@ export async function addRole(_: ActionState, fd: FormData): Promise<ActionState
   if (role === 'finance' && !g.access.perms.has('team_coorg')) return { error: 'Only the fest’s owner can add a Finance lead.' };
   if (email === user.email.toLowerCase()) return { error: 'You can’t add a role to your own email. Ask the fest’s owner.' };
   const name = clip(s(fd, 'name'), 80);
-  const label = clip(s(fd, 'scope_label'), 60) || null;
+  let label = clip(s(fd, 'scope_label'), 60) || null;
+  // v2.8: an Event head / Judge can be linked to one event of this fest (scope label = the event's name)
+  let eventId: string | null = null;
+  const pickedEvent = s(fd, 'event_id');
+  if (pickedEvent && (role === 'event_head' || role === 'judge')) {
+    if (!isUuid(pickedEvent) || !(await eventsReady())) return { error: 'Pick one of this fest’s events.' };
+    const [ev] = await sql<{ title: string }[]>`select title from events where id = ${pickedEvent} and fest_id = ${fest.id}`;
+    if (!ev) return { error: 'Pick one of this fest’s events.' };
+    eventId = pickedEvent;
+    label = clip(ev.title, 60);
+  }
   const day = s(fd, 'scope_day') || null;
   if (day && (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day < fest.starts_on || day > fest.ends_on)) return { error: 'The day must be one of the fest days.' };
   const volunteer = VOLUNTEER_ROLES.includes(role);
@@ -361,8 +371,8 @@ export async function addRole(_: ActionState, fd: FormData): Promise<ActionState
     if (n >= MAX_ROLES) return { error: `A fest can have up to ${MAX_ROLES} team roles.` };
     if (role === 'co_organizer' && co >= MAX_COORGS) return { error: `A fest can have up to ${MAX_COORGS} co-organizers.` };
     const ins = await tx<{ id: string }[]>`
-      insert into fest_roles (fest_id, email, name, role, scope_label, scope_day, duty, can_scan, added_by)
-      values (${fest.id}, ${email}, ${name}, ${role}, ${label}, ${day}, ${duty}, ${canScan}, ${user.id})
+      insert into fest_roles (fest_id, email, name, role, scope_label, scope_day, duty, can_scan, added_by, event_id)
+      values (${fest.id}, ${email}, ${name}, ${role}, ${label}, ${day}, ${duty}, ${canScan}, ${user.id}, ${eventId})
       on conflict do nothing returning id`;
     if (!ins.length) return { error: `${email} already has that role${day ? ' on that day' : ''}${label ? ` for ${label}` : ''}.` };
     return { id: ins[0].id };
@@ -705,6 +715,13 @@ export async function refundOrderAction(_: ActionState, fd: FormData): Promise<A
   if (!Number.isInteger(n) || n < 1) return { error: 'Choose how many tickets to cancel.' };
   try {
     const r = await refundOrder(s(fd, 'orderId'), { festId: fest.id, tickets: n, reason });
+    if (r.isEvent) {
+      await log(g, 'refund', `Refunded an event entry — ${rupees(r.amount)}. Reason: ${clip(reason, 120)}`, { order: s(fd, 'orderId'), amount: r.amount });
+      refresh(fest.id);
+      if (r.provider === 'upi_direct') return { ok: true, message: `Entry refunded and its slot freed. Send ${rupees(r.amount)} back to the student by UPI, then mark it sent.` };
+      if (!r.gatewayOk) return { ok: true, message: 'Entry cancelled, but the gateway refund failed. THE FEST has been alerted to retry.' };
+      return { ok: true, message: `Entry refunded (${rupees(r.amount)}) and its slot freed.` };
+    }
     await log(g, 'refund', `Refunded ${r.k} ticket(s) — ${rupees(r.amount)}${r.addons ? ' (with add-ons)' : ''}. Reason: ${clip(reason, 120)}`,
       { order: s(fd, 'orderId'), tickets: r.k, amount: r.amount });
     refresh(fest.id);

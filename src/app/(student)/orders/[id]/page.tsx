@@ -14,12 +14,12 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const user = await requireUser('student');
   const { id } = await params;
   if (!isUuid(id)) notFound();
-  const [o] = await sql<{ id: string; status: string; method: string; amount_paise: number; utr: string | null; review_flag: string | null; vpa: string; upi_name: string | null; fest: string; slug: string; qty: number; type: string }[]>`
-    select o.id, o.status, o.method, o.amount_paise, o.utr, o.review_flag, f.upi_vpa as vpa, f.upi_name, f.name as fest, f.slug, o.qty, tt.name as type
+  const [o] = await sql<{ id: string; status: string; method: string; amount_paise: number; utr: string | null; review_flag: string | null; vpa: string; upi_name: string | null; fest: string; slug: string; qty: number; type: string; kind: string }[]>`
+    select o.id, o.status, o.method, o.amount_paise, o.utr, o.review_flag, f.upi_vpa as vpa, f.upi_name, f.name as fest, f.slug, o.qty, tt.name as type, tt.kind
     from orders o join fests f on f.id = o.fest_id join ticket_types tt on tt.id = o.ticket_type_id
     where o.id = ${id} and o.user_id = ${user.id}`;
   if (!o) notFound();
-  if (o.status === 'paid') redirect(`/tickets?order=${o.id}`);
+  if (o.status === 'paid') redirect(o.kind === 'event' ? '/my-events?paid=1' : `/tickets?order=${o.id}`);
 
   const note = `TF ${o.id.slice(0, 8).toUpperCase()}`;
   return (

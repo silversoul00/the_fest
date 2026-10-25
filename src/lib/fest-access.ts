@@ -28,8 +28,24 @@ export async function rolesReady(): Promise<boolean> {
 }
 export const ROLES_MISSING = 'Team & Roles needs a database update (v2.7) — ask THE FEST to run it.';
 
+let evReady = false;
+/** Is v2.8 (events, event_regs, event_members, orders.registration_id) in the database? Without it Events is hidden. */
+export async function eventsReady(): Promise<boolean> {
+  if (evReady) return true;
+  const [r] = await sql<{ ok: boolean }[]>`
+    select to_regclass('public.event_members') is not null and to_regclass('public.events') is not null
+       and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'orders' and column_name = 'registration_id') as ok`;
+  evReady = !!r?.ok;
+  return evReady;
+}
+export const EVENTS_MISSING = 'Events need a database update (v2.8) — ask THE FEST to run it.';
+
 export type OwnFest = Fest & { is_owner: boolean };
-export type FestAccess = { fest: OwnFest; isOwner: boolean; roles: RoleKey[]; perms: Set<Perm>; label: string };
+export type FestAccess = {
+  fest: OwnFest; isOwner: boolean; roles: RoleKey[]; perms: Set<Perm>; label: string;
+  /** v2.8: events this person is Event head / Judge of (active roles linked to an event). */
+  headOf: string[]; judgeOf: string[];
+};
 
 /** SQL condition: a fest_roles row `r` is active today for this user. */
 export const activeRole = (user: Pick<User, 'email' | 'verified'>, alias = 'r') =>
@@ -39,17 +55,26 @@ async function load(festId: string, userId: string, email: string, verified: boo
   if (!isUuid(festId)) return null;
   const user = { email, verified };
   const withRoles = await rolesReady();
-  const [f] = await sql<(OwnFest & { roles: string[] })[]>`
+  const [f] = await sql<(OwnFest & { roles: string[]; head_of: string[]; judge_of: string[] })[]>`
     select f.*, (f.organizer_id = ${userId}) as is_owner,
       ${withRoles
         ? sql`coalesce((select array_agg(distinct r.role) from fest_roles r where r.fest_id = f.id and ${activeRole(user)}), '{}')`
-        : sql`'{}'::text[]`} as roles
+        : sql`'{}'::text[]`} as roles,
+      ${withRoles
+        ? sql`coalesce((select array_agg(distinct r.event_id::text) from fest_roles r where r.fest_id = f.id and r.role = 'event_head' and r.event_id is not null and ${activeRole(user)}), '{}')`
+        : sql`'{}'::text[]`} as head_of,
+      ${withRoles
+        ? sql`coalesce((select array_agg(distinct r.event_id::text) from fest_roles r where r.fest_id = f.id and r.role = 'judge' and r.event_id is not null and ${activeRole(user)}), '{}')`
+        : sql`'{}'::text[]`} as judge_of
     from fests f where f.id = ${festId}`;
   if (!f) return null;
   const roles = (f.roles ?? []) as RoleKey[];
   if (!f.is_owner && !roles.length) return null;
-  const { roles: _r, ...fest } = f;
-  return { fest: fest as OwnFest, isOwner: f.is_owner, roles, perms: permsFor(f.is_owner, roles), label: rolesLabel(f.is_owner, roles) };
+  const { roles: _r, head_of, judge_of, ...fest } = f;
+  return {
+    fest: fest as OwnFest, isOwner: f.is_owner, roles, perms: permsFor(f.is_owner, roles), label: rolesLabel(f.is_owner, roles),
+    headOf: head_of ?? [], judgeOf: judge_of ?? [],
+  };
 }
 const loadCached = cache(load);
 
@@ -92,6 +117,43 @@ export async function pageAccess(festId: string, perm: Perm | null) {
   if (!a) notFound();
   if (perm && !a.perms.has(perm)) redirect(`/organizer/${a.fest.id}/no-access`);
   return { user, fest: a.fest, access: a };
+}
+
+/**
+ * v2.8 event scoping. 'manage' = edit details, entry list, mark present, remove an entry, export: the `events` perm
+ * (owner, co-organizer) for any event of the fest, or that event's Event head. 'view' = also that event's Judge
+ * (roster without emails). Anyone else on the team → "Your role can't do this."
+ */
+export type EventMode = 'manage' | 'view';
+export function eventAllowed(a: FestAccess, eventId: string, mode: EventMode): boolean {
+  if (a.perms.has('events')) return true;
+  if (a.headOf.includes(eventId)) return true;
+  return mode === 'view' && a.judgeOf.includes(eventId);
+}
+
+/** Server actions on one event: festId + eventId from the form; the event must belong to this fest. */
+export async function requireEventPerm(fd: FormData, mode: EventMode) {
+  const user = await requireUser();
+  const festId = String(fd.get('festId') ?? '').trim();
+  const eventId = String(fd.get('eventId') ?? '').trim();
+  const a = await festAccess(festId, user);
+  if (!a) throw new Error('Fest not found');
+  if (!(await eventsReady())) throw new Error(EVENTS_MISSING);
+  if (!isUuid(eventId)) throw new Error('Event not found');
+  const [ev] = await sql<{ id: string }[]>`select id from events where id = ${eventId} and fest_id = ${a.fest.id}`;
+  if (!ev) throw new Error('Event not found');
+  if (!eventAllowed(a, eventId, mode)) throw new RoleCantDoThis();
+  return { user, fest: a.fest, access: a, eventId };
+}
+
+/** Pages / routes for one event: unknown → 404, on the team but not this event → the "can't open this tab" page. */
+export async function eventPageAccess(festId: string, eventId: string, mode: EventMode) {
+  const g = await pageAccess(festId, 'events_view');
+  if (!(await eventsReady()) || !isUuid(eventId)) notFound();
+  const [ev] = await sql<{ id: string }[]>`select id from events where id = ${eventId} and fest_id = ${g.fest.id}`;
+  if (!ev) notFound();
+  if (!eventAllowed(g.access, eventId, mode)) redirect(`/organizer/${g.fest.id}/no-access`);
+  return { ...g, eventId };
 }
 
 /** The actor for the activity log. */

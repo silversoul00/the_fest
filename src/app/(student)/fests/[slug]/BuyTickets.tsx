@@ -33,11 +33,13 @@ async function post(url: string, body: unknown) {
   return j;
 }
 
-export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gateway, upiEnabled, hasPhone, prefill, addonFor }: {
+export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gateway, upiEnabled, hasPhone, prefill, addonFor, registrationId }: {
   festSlug: string; signedIn: boolean; isStudent: boolean; types: T[]; feeCfg: FeeConfig; gateway: Gateway; upiEnabled: boolean; hasPhone: boolean;
   prefill: { name: string; email: string; contact: string } | null;
   /** Buying a lunch/stay add-on for this ticket (from the ticket page): one per ticket, no quantity. */
   addonFor?: string;
+  /** Paying for an event entry (v2.8, captain pays once per team): one unit, the server finds the event from the entry. */
+  registrationId?: string;
 }) {
   const router = useRouter();
   const [sel, setSel] = useState(types.find((t) => t.left > 0)?.id ?? '');
@@ -53,10 +55,12 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
   const [upi, setUpi] = useState<Upi | null>(null);
 
   const t = types.find((x) => x.id === sel);
-  const maxQty = addonFor ? 1 : Math.min(10, t?.left ?? 0);
+  const single = !!(addonFor || registrationId);
+  const maxQty = single ? 1 : Math.min(10, t?.left ?? 0);
   const q = t ? quote(t.price, qty, feeCfg, method) : null;
   const done = (orderId: string) => {
     if (addonFor) { router.push(`/tickets/${addonFor}?addon=1`); router.refresh(); return; }
+    if (registrationId) { router.push('/my-events?paid=1'); router.refresh(); return; }
     router.push(`/tickets?order=${orderId}`);
   };
 
@@ -67,7 +71,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
     }
     setBusy(true); setErr('');
     try {
-      const r = await post('/api/checkout', { ticketTypeId: t.id, qty, method, phone: phone || undefined, ticketId: addonFor });
+      const r = await post('/api/checkout', registrationId ? { registrationId, qty: 1, method, phone: phone || undefined } : { ticketTypeId: t.id, qty, method, phone: phone || undefined, ticketId: addonFor });
       if (r.mode === 'done') return done(r.orderId);
       if (r.mode === 'demo') { setDemo({ orderId: r.orderId, amount: r.amount }); setBusy(false); return; }
       if (r.mode === 'upi') { setUpi(r); setBusy(false); return; }
@@ -152,7 +156,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
 
       {t && t.left > 0 && q && !notOnSale && (
         <>
-          {!addonFor && <div className="row between">
+          {!single && <div className="row between">
             <span className="label">Quantity</span>
             <div className="row g8">
               <button className="btn sm outline" onClick={() => setQty((v) => Math.max(1, v - 1))} aria-label="Fewer" disabled={qty <= 1}>−</button>
@@ -174,8 +178,8 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
           )}
 
           <div className="stack g4 small">
-            <div className="row between soft"><span>Tickets</span><span className="mono">{rupees(q.subtotal)}</span></div>
-            {feeCfg.payer === 'student' && q.fee > 0 && <div className="row between soft"><span>Convenience fee</span><span className="mono">{rupees(q.fee)}</span></div>}
+            <div className="row between soft"><span>{registrationId ? 'Entry fee' : 'Tickets'}</span><span className="mono">{rupees(q.subtotal)}</span></div>
+            {feeCfg.payer === 'student' && q.fee > 0 && <div className="row between soft"><span>{registrationId ? 'Platform fee' : 'Convenience fee'}</span><span className="mono">{rupees(q.fee)}</span></div>}
             {q.gatewayFee > 0 && <div className="row between soft"><span>Payment charges</span><span className="mono">{rupees(q.gatewayFee)}</span></div>}
             <div className="row between" style={{ fontSize: 16 }}><strong>Total</strong><strong className="mono c-yellow">{rupees(q.total)}</strong></div>
           </div>

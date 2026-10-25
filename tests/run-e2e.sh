@@ -96,4 +96,8 @@ python3 tests/team_roles.py
 # a role to themselves, no ₹ for non-money roles, scanner link per counter, 390px scanner header, owner card, pending
 # check-in, seeded role accounts, demo seed loads on a fresh database
 python3 tests/team_roles_fix1.py
+# Fest events part A (2026-10-25, v2.8): categories + events, solo/team entries (invites, rules), paid entries (₹5 fee,
+# captain pays once), races (10 registrations on 1 slot, 6 accepts on a 3-max team, two teams at once), refunds and fest
+# cancel, event head / judge scope, Event counter, CSV, activity log, 390px, old database without v2.8 (:3009)
+python3 tests/events.py
 echo "✓ Release check passed"

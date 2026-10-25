@@ -1,6 +1,6 @@
 import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { FeeConfig } from './pricing';
+import { eventFeeConfig, EVENT_FEE_PAISE, type FeeConfig } from './pricing';
 import { appEnv, cashfreeKeysSet, cashfreeLive, demoPaymentsRequested, razorpayKeysSet, razorpayLive } from './env';
 
 /* ─── Commission settings (env) ───────────────────────────────────────
@@ -26,6 +26,11 @@ export function feeConfig(): FeeConfig {
     gatewayRate: num(process.env.GATEWAY_RATE, 0.0236),
     passGateway: process.env.PASS_GATEWAY_FEE !== 'false',
   };
+}
+
+/** Fee config for paid event entries (v2.8): flat EVENT_FEE_PAISE (default ₹5), always paid by the student. */
+export function eventFees(): FeeConfig {
+  return eventFeeConfig(feeConfig(), num(process.env.EVENT_FEE_PAISE, EVENT_FEE_PAISE));
 }
 
 /* ─── Which card/UPI gateway is live ──────────────────────────────────

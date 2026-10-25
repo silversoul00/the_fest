@@ -522,3 +522,82 @@ begin
     comment on table fest_roles is 'v2.7 copied';
   end if;
 end $$;
+
+-- v2.8 (Oct 2026): fest events (part A). A fest has events in fixed categories; students register solo or as a team
+-- (captain invites by email, members accept). Each event has a hidden "shadow" ticket type (kind 'event', quota =
+-- slots, sold = slots taken) so paid entries reuse the ticket checkout, holds, refunds and fest cancellation. Event
+-- orders issue no tickets and never count as tickets; they do count as revenue. Judging/results come in part B.
+do $$
+begin
+  if exists (select 1 from pg_constraint where conname = 'ticket_types_kind_check'
+             and pg_get_constraintdef(oid) not like '%event%') then
+    alter table ticket_types drop constraint ticket_types_kind_check;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'ticket_types_kind_check') then
+    alter table ticket_types add constraint ticket_types_kind_check check (kind in ('entry', 'addon', 'event'));
+  end if;
+end $$;
+create table if not exists events (
+  id             uuid primary key default gen_random_uuid(),
+  fest_id        uuid not null references fests(id) on delete cascade,
+  category       text not null check (category in ('cultural', 'management', 'technical', 'sports', 'literary', 'gaming', 'other')),
+  title          text not null check (char_length(title) between 2 and 80),
+  starts_at      timestamptz not null,
+  ends_at        timestamptz,
+  venue          text not null default '' check (char_length(venue) <= 120),
+  rules          text not null default '' check (char_length(rules) <= 3000),
+  prize          text not null default '' check (char_length(prize) <= 200),
+  team_min       int  not null default 1,
+  team_max       int  not null default 1,
+  price_paise    int  not null default 0 check (price_paise between 0 and 1000000),
+  slots          int  not null check (slots between 1 and 5000),
+  reg_deadline   timestamptz not null,
+  mixed_colleges boolean not null default true,
+  needs_ticket   boolean not null default false,
+  ticket_type_id uuid not null unique references ticket_types(id) on delete restrict,   -- the shadow row
+  active         boolean not null default true,       -- false = hidden from students
+  sort           int  not null default 0,
+  created_at     timestamptz not null default now(),
+  check (team_min >= 1 and team_min <= team_max and team_max <= 20)
+);
+create index if not exists events_fest_idx on events(fest_id, starts_at);
+create table if not exists event_regs (
+  id           uuid primary key default gen_random_uuid(),
+  event_id     uuid not null references events(id) on delete cascade,
+  fest_id      uuid not null references fests(id) on delete cascade,
+  captain_id   uuid not null references users(id) on delete restrict,
+  team_name    text check (char_length(team_name) <= 60),
+  status       text not null default 'forming' check (status in ('forming', 'confirmed', 'withdrawn', 'refunded')),
+  confirmed_at timestamptz,
+  created_at   timestamptz not null default now()
+);
+create index if not exists event_regs_event_idx on event_regs(event_id, status);
+create table if not exists event_members (
+  id            uuid primary key default gen_random_uuid(),
+  reg_id        uuid not null references event_regs(id) on delete cascade,
+  event_id      uuid not null references events(id) on delete cascade,
+  email         citext not null,
+  user_id       uuid references users(id) on delete set null,
+  status        text not null default 'invited' check (status in ('invited', 'joined', 'declined', 'left', 'removed')),
+  invited_at    timestamptz not null default now(),
+  joined_at     timestamptz,
+  checked_in_at timestamptz,
+  checked_in_by uuid references users(id) on delete set null
+);
+-- one team per student per event (no double registration); one open invite per email per team
+create unique index if not exists event_members_one_team on event_members(event_id, user_id) where status = 'joined';
+create unique index if not exists event_members_invite on event_members(reg_id, email) where status in ('invited', 'joined');
+create index if not exists event_members_email_idx on event_members(email) where status = 'invited';
+create index if not exists event_members_reg_idx on event_members(reg_id);
+alter table orders add column if not exists registration_id uuid references event_regs(id) on delete restrict;
+create unique index if not exists orders_registration_open on orders(registration_id) where status in ('pending', 'paid');
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fest_roles_event_id_fkey') then
+    update fest_roles r set event_id = null where event_id is not null and not exists (select 1 from events e where e.id = r.event_id);
+    alter table fest_roles add constraint fest_roles_event_id_fkey foreign key (event_id) references events(id) on delete cascade;
+  end if;
+end $$;
+alter table events        enable row level security;
+alter table event_regs    enable row level security;
+alter table event_members enable row level security;

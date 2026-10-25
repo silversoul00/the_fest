@@ -7,7 +7,7 @@ import { lunchToday, splitTf2 } from '@/lib/qr2-format.ts';
 import { idbAll, idbClear, idbDel, idbGet, idbPut, type Queued } from './offline-store';
 
 type Counts = { inn: number; total: number; mine: number };
-type Counter = 'gate' | 'lunch' | 'stay';
+type Counter = 'gate' | 'lunch' | 'stay' | 'event';
 type Verdict = {
   result: 'admitted' | 'duplicate' | 'invalid' | 'wrong_fest' | 'void' | 'offline';
   message: string; holder?: string; type?: string; code?: string; checkedInAt?: string; gate?: string | null;
@@ -20,8 +20,9 @@ const TITLE: Record<Counter, Record<Verdict['result'], string>> = {
   gate: { admitted: '✓ Admit', duplicate: '⚠ Already in', invalid: '✕ Invalid', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled', offline: '✓ Admit (offline)' },
   lunch: { admitted: '✓ Lunch', duplicate: '⚠ Already had lunch', invalid: '✕ No lunch', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled', offline: '✓ Lunch (offline)' },
   stay: { admitted: '✓ Stay', duplicate: '⚠ Already checked out', invalid: '✕ No stay', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled', offline: '✓ Stay (offline)' },
+  event: { admitted: '✓ Present', duplicate: '⚠ Already marked', invalid: '✕ Not in this event', wrong_fest: '✕ Wrong fest', void: '✕ Cancelled', offline: '✕ Needs internet' },
 };
-const COUNTER_LABEL: Record<Counter, string> = { gate: 'Gate', lunch: 'Lunch counter', stay: 'Stay desk' };
+const COUNTER_LABEL: Record<Counter, string> = { gate: 'Gate', lunch: 'Lunch counter', stay: 'Stay desk', event: 'Event counter' };
 const LIVE_LABEL: Record<LiveState, string> = { live: 'Live ✓', stale: 'Old screenshot', static: 'Static (print/screenshot)' };
 const istDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 const todayIST = () => istDay(Date.now());
@@ -49,8 +50,10 @@ function feedback(ok: boolean) {
   } catch {}
 }
 
-export function Scanner({ counter, counters, fests, festId, festName, defaultGate, volunteer, scannerId, initialCounts, lockAction }: {
+export function Scanner({ counter, counters, fests, festId, festName, defaultGate, volunteer, scannerId, initialCounts, lockAction, events = [], eventId = null }: {
   counter: Counter; counters: Counter[];
+  /** Event counter (v2.8): the events this person may mark, and the one picked. Online only. */
+  events?: { id: string; title: string }[]; eventId?: string | null;
   fests: { id: string; name: string }[]; festId: string; festName: string; defaultGate: string;
   volunteer: string; scannerId: string; initialCounts: Counts; lockAction: () => Promise<void>;
 }) {
@@ -214,9 +217,10 @@ export function Scanner({ counter, counters, fests, festId, festName, defaultGat
       const b = bundleRef.current;
       const opened = data.payload && b ? await openTicket(data.payload, b) : null;
       setCard(opened && (opened.kind === 'ok' || opened.kind === 'tf1') ? opened : null);
+      if (counter === 'event' && !eventId) return show({ result: 'invalid', message: 'No event to mark — ask the organizer to link your role to an event.' }, false);
       if (navigator.onLine) {
         try {
-          const r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId, gate, counter, ...data }) });
+          const r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ festId, gate, counter, eventId: eventId ?? undefined, ...data }) });
           if (r.status === 401) { await locked(); return; }
           const v: Verdict = await r.json();
           if (!r.ok) { setVerdict({ result: 'invalid', message: v.error ?? 'Scan failed' }); feedback(false); return; }
@@ -229,13 +233,14 @@ export function Scanner({ counter, counters, fests, festId, festName, defaultGat
           return;
         } catch { /* network dropped: decide offline below */ }
       }
+      if (counter === 'event') return show({ result: 'invalid', message: 'Event counter needs internet' }, false);
       if (data.code) return show({ result: 'invalid', message: 'Backup codes need internet — scan the QR instead' }, false);
       await offline(data.payload!, opened);
     } finally {
       // Hold the verdict on screen so the volunteer can read it
       setTimeout(() => { busy.current = false; }, 1400);
     }
-  }, [festId, gate, counter, locked, offline, show]);
+  }, [festId, gate, counter, eventId, locked, offline, show]);
 
   // Camera loop
   useEffect(() => {
@@ -293,7 +298,7 @@ export function Scanner({ counter, counters, fests, festId, festName, defaultGat
   const pct = counts.total ? Math.round((counts.inn / counts.total) * 100) : 0;
 
   return (
-    <div className="scan-shell" style={{ ['--accent' as string]: 'var(--green)' }}>
+    <div className={`scan-shell${counter === 'event' ? ' ev-ui' : ''}`} style={{ ['--accent' as string]: 'var(--green)' }}>
       <header className="topbar">
         <div className="wrap topbar-in">
           <span className="logo" style={{ fontSize: 20, color: 'var(--green)' }}>{counter === 'gate' ? 'GATE SCANNER' : COUNTER_LABEL[counter].toUpperCase()}</span>
@@ -301,7 +306,7 @@ export function Scanner({ counter, counters, fests, festId, festName, defaultGat
         </div>
       </header>
 
-      {!online && (bundle
+      {!online && counter === 'event' ? <div className="alert error" style={{ textAlign: 'center' }} role="status">Offline — Event counter needs internet.</div> : !online && (bundle
         ? <div className="alert info" style={{ textAlign: 'center' }} role="status">Offline — scans are saved on this phone and sync when you’re back online.</div>
         : <div className="alert error" style={{ textAlign: 'center' }}>Offline — scans need internet to stop duplicate entries.</div>)}
 
@@ -328,10 +333,22 @@ export function Scanner({ counter, counters, fests, festId, festName, defaultGat
           )}
         </div>
 
-        {bundle && <p className="xs c-green" data-offline-ready>Offline ready — keep this page open{queued ? ` · ${queued} scan${queued > 1 ? 's' : ''} waiting to sync` : ''}</p>}
+        {counter === 'event' && (events.length ? (
+          <select className="select" value={eventId ?? ''} aria-label="Event" style={{ width: '100%' }}
+            onChange={(e) => router.replace(`/scan?fest=${festId}&counter=event&event=${e.target.value}`)}>
+            {events.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}
+          </select>
+        ) : <div className="alert info">No events to mark here yet. The organizer links Event heads to an event under Team.</div>)}
+        {bundle && counter !== 'event' && <p className="xs c-green" data-offline-ready>Offline ready — keep this page open{queued ? ` · ${queued} scan${queued > 1 ? 's' : ''} waiting to sync` : ''}</p>}
         {queued > 0 && online && <button className="btn sm outline" type="button" data-sync-now onClick={() => sync()}>Sync {queued} waiting scan{queued > 1 ? 's' : ''} now</button>}
         {others > 0 && <p className="xs muted" data-others-queued>{others} scan{others > 1 ? 's' : ''} saved by another volunteer on this phone — they sync when that volunteer logs in here.</p>}
-        {counter !== 'gate' ? (
+        {counter === 'event' ? (
+          <div className="grid-2" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
+            <div className="stat" style={{ ['--stat' as string]: 'var(--green)', padding: 12 }}><div className="label">Present</div><div className="v" style={{ fontSize: 30 }}>{counts.inn}</div></div>
+            <div className="stat" style={{ ['--stat' as string]: 'var(--yellow)', padding: 12 }}><div className="label">Registered</div><div className="v" style={{ fontSize: 30 }}>{counts.total}</div></div>
+            <div className="stat" style={{ ['--stat' as string]: 'var(--blue)', padding: 12 }}><div className="label">By you</div><div className="v" style={{ fontSize: 30 }}>{counts.mine}</div></div>
+          </div>
+        ) : counter !== 'gate' ? (
           <div className="grid-2" style={{ gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
             <div className="stat" style={{ ['--stat' as string]: 'var(--yellow)', padding: 12 }}><div className="label">{counter === 'lunch' ? 'Lunches today' : 'Stay scans today'}</div><div className="v" style={{ fontSize: 30 }}>{counts.inn}</div></div>
             <div className="stat" style={{ ['--stat' as string]: 'var(--blue)', padding: 12 }}><div className="label">By you</div><div className="v" style={{ fontSize: 30 }}>{counts.mine}</div></div>

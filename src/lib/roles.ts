@@ -26,8 +26,8 @@ export const ROLE_LABEL: Record<RoleKey, string> = {
 /** One line under each role in the "Add to team" form. */
 export const ROLE_HINT: Record<RoleKey, string> = {
   co_organizer: 'Runs the fest with you (everything except refunds, adding Finance leads or co-organizers, payout UPI ID and cancelling).',
-  event_head: 'Sees the overview and schedule of the fest.',
-  judge: 'Listed on the team (judging comes with Competitions).',
+  event_head: 'Runs one event: its details, entry list, CSV and the Event scanner counter. Not its fee or slots.',
+  judge: 'Sees the entry list of one event (no emails). Scoring comes later.',
   finance: 'Sales, payments, refunds, analytics and the CSV export.',
   sponsorship: 'Sponsors, brand requests and analytics.',
   media: 'Schedule, announcements and analytics.',
@@ -55,6 +55,8 @@ export const PERMS = [
   'team_coorg',        // add / remove co-organizers
   'activity',          // activity log
   'cancel',            // cancel the fest
+  'events',            // v2.8: add / edit / delete any event, see every entry list, export
+  'events_view',       // v2.8: open the Events tab (event heads / judges see only their own event)
 ] as const;
 export type Perm = (typeof PERMS)[number];
 
@@ -62,21 +64,21 @@ export type Perm = (typeof PERMS)[number];
  * Who may refund — Harshith, Oct 24 2026: "owner + Finance lead". Owner always has every permission.
  */
 export const ROLE_PERMS: Record<RoleKey, readonly Perm[]> = {
-  co_organizer: ['overview', 'money', 'fest', 'sales', 'payments', 'analytics', 'export', 'schedule_view', 'schedule', 'announce', 'sponsors', 'team', 'activity'],
+  co_organizer: ['overview', 'money', 'fest', 'sales', 'payments', 'analytics', 'export', 'schedule_view', 'schedule', 'announce', 'sponsors', 'team', 'activity', 'events', 'events_view'],
   finance: ['overview', 'money', 'sales', 'refund', 'payments', 'analytics', 'export'],
   sponsorship: ['overview', 'analytics', 'sponsors'],
   media: ['overview', 'analytics', 'schedule_view', 'schedule', 'announce'],
-  event_head: ['overview', 'schedule_view'],
-  judge: [],
+  event_head: ['overview', 'schedule_view', 'events_view'],
+  judge: ['events_view'],
   desk: ['sales'],
   vol_gate: [],
   vol_lunch: [],
   vol_stay: [],
 };
 
-export type Counter = 'gate' | 'lunch' | 'stay';
+export type Counter = 'gate' | 'lunch' | 'stay' | 'event';
 /** Scanner counter each role works. Owner and co-organizers are scanner "managers" (any counter + organizer seal). */
-export const ROLE_COUNTER: Partial<Record<RoleKey, Counter>> = { vol_gate: 'gate', desk: 'gate', vol_lunch: 'lunch', vol_stay: 'stay' };
+export const ROLE_COUNTER: Partial<Record<RoleKey, Counter>> = { vol_gate: 'gate', desk: 'gate', vol_lunch: 'lunch', vol_stay: 'stay', event_head: 'event' };
 export const VOLUNTEER_ROLES: readonly RoleKey[] = ['vol_gate', 'vol_lunch', 'vol_stay', 'desk'];
 
 export const isRoleKey = (r: unknown): r is RoleKey => typeof r === 'string' && (ROLE_KEYS as readonly string[]).includes(r);
@@ -96,6 +98,7 @@ export const TABS: { seg: string; icon: string; label: string; perm: Perm }[] = 
   { seg: '/analytics', icon: '📊', label: 'Analytics', perm: 'analytics' },
   { seg: '/payments', icon: '🏦', label: 'Payments', perm: 'payments' },
   { seg: '/schedule', icon: '📅', label: 'Schedule', perm: 'schedule_view' },
+  { seg: '/events', icon: '🏆', label: 'Events', perm: 'events_view' },
   { seg: '/team', icon: '👥', label: 'Team', perm: 'team' },
   { seg: '/announcements', icon: '📢', label: 'Announce', perm: 'announce' },
   { seg: '/sponsors', icon: '🏷️', label: 'Sponsors', perm: 'sponsors' },
@@ -114,4 +117,4 @@ export const rolesLabel = (isOwner: boolean, roles: readonly string[]) =>
 
 /** Name of the scanner link for someone whose counters at a fest are `counters` (managers: every counter). */
 export const scannerLabel = (counters: readonly Counter[]) =>
-  counters.length === 1 ? `${{ gate: 'Gate', lunch: 'Lunch', stay: 'Stay' }[counters[0]]} scanner` : 'Scanner';
+  counters.length === 1 ? `${{ gate: 'Gate', lunch: 'Lunch', stay: 'Stay', event: 'Event' }[counters[0]]} scanner` : 'Scanner';

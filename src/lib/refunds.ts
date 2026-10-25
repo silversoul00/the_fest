@@ -14,18 +14,18 @@ import { afterResponse, reportError } from './errors';
  * • Demo / free: nothing to send.
  * Checked-in (used) tickets can't be refunded.
  */
-export async function refundOrder(orderId: string, opts: { festId: string; tickets?: number; reason: string; releaseSeats?: boolean; withAddons?: boolean }): Promise<{ amount: number; k: number; provider: string; refundedAfter: number; paymentId: string | null; gatewayOk: boolean; addons: number }> {
+export async function refundOrder(orderId: string, opts: { festId: string; tickets?: number; reason: string; releaseSeats?: boolean; withAddons?: boolean }): Promise<{ isEvent: boolean; amount: number; k: number; provider: string; refundedAfter: number; paymentId: string | null; gatewayOk: boolean; addons: number }> {
   const res = await sql.begin(async (tx) => {
-    const [o] = await tx<{ id: string; qty: number; amount_paise: number; refunded_paise: number; platform_fee_paise: number; gateway_fee_paise: number; provider: string; status: string; ticket_type_id: string; payment_ref: string | null; razorpay_payment_id: string | null; addon_for: string | null }[]>`
-      select id, qty, amount_paise, refunded_paise, platform_fee_paise, gateway_fee_paise, provider, status, ticket_type_id, payment_ref, razorpay_payment_id, addon_for
-      from orders where id = ${orderId} and fest_id = ${opts.festId} for update`;
+    const [o] = await tx<{ id: string; qty: number; amount_paise: number; refunded_paise: number; platform_fee_paise: number; gateway_fee_paise: number; provider: string; status: string; ticket_type_id: string; payment_ref: string | null; razorpay_payment_id: string | null; addon_for: string | null; registration_id?: string | null }[]>`
+      select * from orders where id = ${orderId} and fest_id = ${opts.festId} for update`;  // * : registration_id exists only from v2.8
     if (!o) throw new OrderError('Order not found.');
     if (o.status !== 'paid') throw new OrderError('Only paid orders can be refunded.');
 
-    // Add-on orders (lunch / stay) issue no tickets: the whole add-on is refunded as one unit, and its perks stop working.
-    const unused = o.addon_for ? [] : await tx<{ id: string }[]>`
+    // Add-on orders (lunch / stay) and event entries (v2.8) issue no tickets: refunded as one unit.
+    const unit = !!(o.addon_for || o.registration_id);
+    const unused = unit ? [] : await tx<{ id: string }[]>`
       select id from tickets where order_id = ${orderId} and status = 'valid' order by issued_at for update`;
-    const k = o.addon_for ? 1 : Math.min(opts.tickets ?? unused.length, unused.length);
+    const k = unit ? 1 : Math.min(opts.tickets ?? unused.length, unused.length);
     if (k <= 0) throw new OrderError('All tickets in this order were already used or cancelled.');
 
     const share = (v: number) => Math.round((v * k) / o.qty);
@@ -33,7 +33,7 @@ export async function refundOrder(orderId: string, opts: { festId: string; ticke
     const ids = unused.slice(0, k).map((t) => t.id);
     if (ids.length) await tx`update tickets set status = 'void', void_reason = ${('Cancelled: ' + opts.reason).slice(0, 200)} where id in ${tx(ids)}`;
 
-    const [{ left }] = o.addon_for ? [{ left: 0 }]
+    const [{ left }] = unit ? [{ left: 0 }]
       : await tx<{ left: number }[]>`select count(*)::int as left from tickets where order_id = ${orderId} and status in ('valid', 'used')`;
     const refundStatus = o.provider === 'upi_direct' ? 'manual_pending' : o.provider === 'cashfree' || o.provider === 'razorpay' ? 'processing' : 'done';
     await tx`update orders set
@@ -47,9 +47,14 @@ export async function refundOrder(orderId: string, opts: { festId: string; ticke
         refund_note = ${opts.reason.slice(0, 200)}
       where id = ${orderId}`;
     if (opts.releaseSeats !== false) await tx`update ticket_types set sold = greatest(sold - ${k}, 0) where id = ${o.ticket_type_id}`;
+    // Event entry: refunded → the team is out and its members may join another team
+    if (o.registration_id) {
+      await tx`update event_regs set status = 'refunded' where id = ${o.registration_id}`;
+      await tx`update event_members set status = 'left' where reg_id = ${o.registration_id} and status in ('joined', 'invited')`;
+    }
     // Paid lunch/stay add-ons on the tickets just cancelled can't be used any more — refunded right after (each once).
     const addonIds = ids.length ? (await tx<{ id: string }[]>`select id from orders where addon_for in ${tx(ids)} and status = 'paid'`).map((r) => r.id) : [];
-    return { addonIds, amount, k, provider: o.provider, refundedAfter: o.refunded_paise + amount, paymentId: o.provider === 'razorpay' ? o.razorpay_payment_id : o.payment_ref };
+    return { addonIds, isEvent: !!o.registration_id, amount, k, provider: o.provider, refundedAfter: o.refunded_paise + amount, paymentId: o.provider === 'razorpay' ? o.razorpay_payment_id : o.payment_ref };
   });
 
   // Money movement happens after the database is updated; failures are flagged for retry.

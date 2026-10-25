@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { requireUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
@@ -18,6 +19,11 @@ type Row = {
 export default async function MyTickets({ searchParams }: { searchParams: Promise<{ order?: string; sent?: string }> }) {
   const user = await requireUser('student');
   const { order, sent } = await searchParams;
+  // A paid event entry (v2.8) is not a ticket: its checkout lands on My events
+  if (order && isUuid(order)) {
+    const [ev] = await sql`select 1 from orders o join ticket_types tt on tt.id = o.ticket_type_id where o.id = ${order} and o.user_id = ${user.id} and tt.kind = 'event'`;
+    if (ev) redirect('/my-events?paid=1');
+  }
   const rows = await sql<Row[]>`
     select t.id, t.code, t.holder_name, t.status, t.checked_in_at, t.order_id,
            tt.name as type_name, f.name as fest_name, f.slug, f.emoji, f.accent, f.college, f.starts_on, f.ends_on
@@ -54,7 +60,7 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
 
   return (
     <div className="wrap stack g16">
-      <h1 className="h2 mt8">My tickets</h1>
+      <div className="row between g8 wrap-row mt8"><h1 className="h2">My tickets</h1><Link href="/my-events" className="btn sm outline">🏆 My events</Link></div>
       {pending.some((p) => p.utr) && <AutoRefresh seconds={20} stopAfterMinutes={10} />}
 
       {sentTo && <div className="alert ok wrap-anywhere">Ticket sent to {cutText(sentTo.name, 60)}. Their new QR is in their account.</div>}

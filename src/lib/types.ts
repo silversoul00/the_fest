@@ -51,7 +51,7 @@ export interface TicketType {
   sort: number;
   active: boolean;
   /** 'addon' = bought on top of an existing ticket (no new ticket, no seat). */
-  kind: 'entry' | 'addon';
+  kind: 'entry' | 'addon' | 'event';  // 'event' (v2.8) = an event's hidden slot counter, never a ticket
   /** IST dates ('YYYY-MM-DD') this type gives one lunch on. */
   lunch_days: string[];
   includes_stay: boolean;

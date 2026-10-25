@@ -7,10 +7,13 @@ import { getUser } from '@/lib/auth';
 import { festAccess } from '@/lib/fest-access';
 import { getAnnouncements, getFestBySlug, getSchedule, getTicketTypes } from '@/lib/queries';
 import { ago, dateRange, dayLabel, time } from '@/lib/format';
-import { activeGateway, feeConfig } from '@/lib/payments';
+import { activeGateway, eventFees, feeConfig } from '@/lib/payments';
 import { catLabel, FestStatus } from '@/components/ui';
 import { BuyTickets } from './BuyTickets';
 import { isRenameNote } from '@/lib/fest-form';
+import { sql } from '@/lib/db';
+import { eventsReady } from '@/lib/fest-access';
+import { EVENT_CATEGORIES, EVENT_CATEGORY_LABEL, feeText, isEventCategory, slotState, teamText } from '@/lib/event-format';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const f = await getFestBySlug((await params).slug);
@@ -18,8 +21,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return { title: f.name, description: `${f.name} at ${f.college}, ${f.city} · ${dateRange(f.starts_on, f.ends_on)}. ${f.description.slice(0, 120)}` };
 }
 
-export default async function FestPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function FestPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ cat?: string }> }) {
   const { slug } = await params;
+  const { cat } = await searchParams;
   const fest = await getFestBySlug(slug);
   const user = await getUser();
   // Drafts and new fests waiting for approval are visible only to their organizer (preview) and THE FEST's admins.
@@ -30,6 +34,13 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
   if (!fest || ((fest.status === 'draft' || (fest.status === 'review' && !renameCheck)) && !runsIt && !user?.is_admin)) notFound();
 
   const [types, schedule, news] = await Promise.all([getTicketTypes(fest.id, 'entry'), getSchedule(fest.id), getAnnouncements(fest.id, 5)]);
+  // v2.8 events (hidden ones never show)
+  const events = (await eventsReady()) ? await sql<{ id: string; title: string; category: string; starts_at: Date; venue: string; team_min: number; team_max: number; price_paise: number; needs_ticket: boolean; slots: number; taken: number; reg_deadline: Date }[]>`
+    select e.id, e.title, e.category, e.starts_at, e.venue, e.team_min, e.team_max, e.price_paise, e.needs_ticket, e.slots, tt.sold as taken, e.reg_deadline
+    from events e join ticket_types tt on tt.id = e.ticket_type_id where e.fest_id = ${fest.id} and e.active order by e.starts_at, e.title` : [];
+  const cats = EVENT_CATEGORIES.filter((c) => events.some((e) => e.category === c));
+  const pickedCat = isEventCategory(cat) && cats.includes(cat) ? cat : null;
+  const shownEvents = pickedCat ? events.filter((e) => e.category === pickedCat) : events;
 
   // Group schedule by IST day
   const days = new Map<string, ScheduleEvent[]>();
@@ -87,6 +98,29 @@ export default async function FestPage({ params }: { params: Promise<{ slug: str
                       </div>
                     </div>
                   ))}
+                </div>
+              </section>
+            )}
+
+            {events.length > 0 && (
+              <section id="events" className="ev-ui">
+                <h2 className="h3 mb16">Events</h2>
+                <div className="row g8 wrap-row mb16" role="navigation" aria-label="Event categories">
+                  <Link href={`/fests/${fest.slug}#events`} className={`badge ${pickedCat ? 'gray' : 'yellow'}`} style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', padding: '0 14px' }} scroll={false}>All</Link>
+                  {cats.map((c) => <Link key={c} href={`/fests/${fest.slug}?cat=${c}#events`} className={`badge ${pickedCat === c ? 'yellow' : 'gray'}`} style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', padding: '0 14px' }} scroll={false} data-chip={c}>{EVENT_CATEGORY_LABEL[c]}</Link>)}
+                </div>
+                <div className="stack g12">
+                  {shownEvents.map((e) => {
+                    const st = slotState(e.taken, e.slots, e.reg_deadline);
+                    return (
+                      <Link key={e.id} href={`/fests/${fest.slug}/events/${e.id}`} className="card tight stack g4" style={{ background: 'var(--black)' }} data-event-card={e.title}>
+                        <div className="row between g8"><strong className="wrap-anywhere">{e.title}</strong>
+                          <span className={`badge ${st.kind === 'open' ? 'green' : st.kind === 'full' ? 'orange' : 'gray'}`} data-slots>{st.text}</span></div>
+                        <div className="xs muted">{dayLabel(e.starts_at)} {time(e.starts_at)}{e.venue ? ` · ${e.venue}` : ''}</div>
+                        <div className="xs soft"><span data-team>{teamText(e.team_min, e.team_max)}</span> · <span data-fee>{feeText(e.price_paise, e.needs_ticket, eventFees().flatPaise, e.team_max > 1)}</span></div>
+                      </Link>
+                    );
+                  })}
                 </div>
               </section>
             )}

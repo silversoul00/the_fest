@@ -9,6 +9,7 @@ import { notifyOrderPaid } from '@/lib/mail';
 import { siteUrl } from '@/lib/env';
 import { checkTicketKeys } from '@/lib/ticket-crypto';
 import { afterResponse, reportError } from '@/lib/errors';
+import { eventsReady } from '@/lib/fest-access';
 
 const NOT_OPEN = 'Card/UPI checkout isn’t open yet. Use bank UPI if the fest offers it.';
 
@@ -18,8 +19,16 @@ export async function POST(req: Request) {
   if (!user) return fail('Please log in to buy tickets.', 401);
   if (user.role !== 'student') return fail('Tickets are bought from a student account.', 403);
 
-  const b = await body<{ ticketTypeId?: string; qty?: number; method?: string; phone?: string; ticketId?: string }>(req);
-  if (!b || !isUuid(b.ticketTypeId)) return fail('Choose a ticket type.');
+  const b = await body<{ ticketTypeId?: string; qty?: number; method?: string; phone?: string; ticketId?: string; registrationId?: string }>(req);
+  if (!b) return fail('Choose a ticket type.');
+  // v2.8 event entry: the server resolves the event's hidden ticket type from the entry (the captain pays once per team)
+  if (b.registrationId !== undefined) {
+    if (!isUuid(b.registrationId) || !(await eventsReady())) return fail('Entry not found.');
+    const [r] = await sql<{ tt: string }[]>`select e.ticket_type_id as tt from event_regs r join events e on e.id = r.event_id where r.id = ${b.registrationId}`;
+    if (!r) return fail('Entry not found.');
+    b.ticketTypeId = r.tt;
+  }
+  if (!isUuid(b.ticketTypeId)) return fail('Choose a ticket type.');
   if (b.ticketId !== undefined && !isUuid(b.ticketId)) return fail('Pick one of your tickets.');
   const method = b.method === 'upi_direct' ? 'upi_direct' : 'gateway';
 
@@ -56,7 +65,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const o = await createOrder({ userId: user.id, ticketTypeId: b.ticketTypeId, qty: Number(b.qty ?? 1), method, ticketId: b.ticketId });
+    const o = await createOrder({ userId: user.id, ticketTypeId: b.ticketTypeId, qty: Number(b.qty ?? 1), method, ticketId: b.ticketId, registrationId: b.registrationId });
 
     if (o.free) {
       await fulfilOrder(o.orderId, { provider: 'free' });

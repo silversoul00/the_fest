@@ -1,7 +1,8 @@
 import { getScanner } from '@/lib/auth';
 import { body, fail, isUuid, json, sameOrigin } from '@/lib/http';
 import { scannableFests } from '@/lib/queries';
-import { checkIn, liveOf, perkCounts, redeemPerk, type Counter } from '@/lib/scan';
+import { checkIn, liveOf, markEvent, perkCounts, redeemPerk, type Counter } from '@/lib/scan';
+import { counterEvents, eventCounts } from '@/lib/events';
 import { dateRange } from '@/lib/format';
 import { sql } from '@/lib/db';
 
@@ -10,7 +11,7 @@ export async function POST(req: Request) {
   const scanner = await getScanner();
   if (!scanner) return fail('Scanner locked — log in again.', 401);
 
-  const b = await body<{ festId?: string; gate?: string; counter?: string; payload?: string; code?: string }>(req);
+  const b = await body<{ festId?: string; gate?: string; counter?: string; payload?: string; code?: string; eventId?: string }>(req);
   if (!b || !isUuid(b.festId)) return fail('Pick a fest first.');
   if (!b.payload && !b.code) return fail('Nothing scanned.');
   if ((b.payload?.length ?? 0) > 600 || (b.code?.length ?? 0) > 40) return fail('Not a THE FEST ticket.');
@@ -24,6 +25,14 @@ export async function POST(req: Request) {
   const counter: Counter = f.counters.includes(b.counter as Counter) ? (b.counter as Counter) : f.counters[0];
 
   const live = liveOf(b.payload);
+  if (counter === 'event') {
+    // Event heads: only their own event(s); managers: any event of this fest
+    if (!isUuid(b.eventId) || !(await counterEvents(b.festId, scanner, f.manager)).some((e) => e.id === b.eventId)) {
+      return fail('Pick one of your events first.', 403);
+    }
+    const verdict = await markEvent({ festId: b.festId, scannerId: scanner.id, eventId: b.eventId, payload: b.payload, code: b.code });
+    return json({ ...verdict, counter, live, counts: await eventCounts(b.eventId, scanner.id) });
+  }
   if (counter !== 'gate') {
     const verdict = await redeemPerk({ festId: b.festId, scannerId: scanner.id, counter, payload: b.payload, code: b.code });
     return json({ ...verdict, counter, live, counts: await perkCounts(b.festId, scanner.id, counter) });

@@ -339,3 +339,6 @@ img, svg { display: block; max-width: 100%; }
 summary.btn { list-style: none; } summary.btn::-webkit-details-marker { display: none; }
 .sp-nav { display: flex; flex-wrap: wrap; gap: 8px; }
 .sp-nav .chip { min-height: 44px; display: inline-flex; align-items: center; flex: none; }
+
+/* v2.8 event screens: every tap target at least 44px (phones) */
+.ev-ui .btn.sm, .ev-ui .btn.text, .ev-ui .select, .ev-ui .input { min-height: 44px; }

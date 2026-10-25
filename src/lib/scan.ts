@@ -4,6 +4,7 @@ import { verifyTicket } from './ticket-crypto';
 import { verifyTf2, type Live } from './qr2.ts';
 import { isTf2Text } from './qr2-format.ts';
 import { time, todayIST } from './format';
+import { markPresentByTicket } from './events';
 import type { Counter } from './roles';
 export type { Counter };
 
@@ -201,4 +202,14 @@ export async function perkCounts(festId: string, scannerId: string, counter: 'lu
       and (created_at at time zone 'Asia/Kolkata')::date = ${todayIST()}::date
       and ${counter === 'lunch' ? sql`slot like 'lunch:%'` : sql`slot in ('stay_in', 'stay_out')`}`;
   return { inn: c.inn, total: 0, mine: c.mine };
+}
+
+/**
+ * v2.8 Event counter: the same ticket QR (or typed code) marks the ticket's owner present at one event, once.
+ * Online only (no sealed QR section — event lists change after the QR is made); not written to `scans`.
+ */
+export async function markEvent(opts: { festId: string; scannerId: string; eventId: string; payload?: string; code?: string }): Promise<Verdict> {
+  const r = await resolveTicket({ festId: opts.festId, scannerId: opts.scannerId, logAs: null, payload: opts.payload, code: opts.code });
+  if ('verdict' in r) return r.verdict;
+  return markPresentByTicket({ festId: opts.festId, eventId: opts.eventId, ticketId: r.ticketId, scannerId: opts.scannerId });
 }

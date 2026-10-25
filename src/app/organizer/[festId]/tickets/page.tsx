@@ -32,7 +32,7 @@ function PerkFields({ days, t }: { days: string[]; t?: { kind: string; lunch_day
 
 export default async function TicketTypes({ params }: { params: Promise<{ festId: string }> }) {
   const { fest } = await pageAccess((await params).festId, 'fest');
-  const types = await getTicketTypes(fest.id);
+  const types = (await getTicketTypes(fest.id)).filter((t) => t.kind !== 'event');  // event slot counters live on the Events tab
   const cfg = feeConfig();
   const days = festDays(fest.starts_on, fest.ends_on);
   const perkText = (t: { lunch_days: string[]; includes_stay: boolean }) =>

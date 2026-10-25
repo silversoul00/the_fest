@@ -25,6 +25,8 @@ export const REQUIRED_TABLES = [
   'brand_profiles', 'sponsor_requests',
   // v2.7 (team & roles)
   'fest_roles', 'fest_activity',
+  // v2.8 (fest events)
+  'events', 'event_regs', 'event_members',
 ] as const;
 
 export const REQUIRED_COLUMNS = [
@@ -41,6 +43,7 @@ export const REQUIRED_COLUMNS = [
   'fests.qr_epoch',
   'sponsors.lead_offer',
   'fests.open_to_sponsors',
+  'orders.registration_id',
 ] as const;
 
 /**

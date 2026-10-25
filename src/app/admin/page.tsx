@@ -54,8 +54,8 @@ export default async function AdminHome() {
     festMoney(),
     sql<{ id: string; name: string; slug: string; college: string; city: string; starts_on: string; ends_on: string; organizer: string; email: string; phone: string | null; types: number; min_price: number | null; created_at: Date; description: string; review_note: string | null }[]>`
       select f.id, f.name, f.slug, f.college, f.city, f.starts_on, f.ends_on, u.name as organizer, u.email::text as email, u.phone, f.created_at, f.description, f.review_note,
-        (select count(*) from ticket_types t where t.fest_id = f.id and t.active)::int as types,
-        (select min(price_paise) from ticket_types t where t.fest_id = f.id and t.active)::int as min_price
+        (select count(*) from ticket_types t where t.fest_id = f.id and t.active and t.kind <> 'event')::int as types,
+        (select min(price_paise) from ticket_types t where t.fest_id = f.id and t.active and t.kind <> 'event')::int as min_price
       from fests f join users u on u.id = f.organizer_id where f.status = 'review' order by f.created_at`,
     sql<{ live: number; users: number; orders_today: number }[]>`
       select (select count(*) from fests where status = 'live')::int live,

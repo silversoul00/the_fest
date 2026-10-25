@@ -56,3 +56,10 @@ export function describeFee(cfg: FeeConfig): string {
   if (cfg.maxPaise) parts.push(`max ${r(cfg.maxPaise)}`);
   return parts.join(', ') + ' per paid ticket';
 }
+
+/** Platform fee on a paid event entry (Harshith, Oct 25 2026): ₹5 flat, paid by the captain once per team. */
+export const EVENT_FEE_PAISE = 500;
+/** Fee config for an event entry: the fest's gateway settings, a flat fee the student pays. */
+export function eventFeeConfig(base: FeeConfig, feePaise = EVENT_FEE_PAISE): FeeConfig {
+  return { ...base, mode: 'flat', flatPaise: feePaise, payer: 'student' };
+}

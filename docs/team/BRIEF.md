@@ -137,6 +137,8 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
   students can leave a team before the deadline and captains can remove members; full events just show "Full" (no
   waitlist in v1). Event entry via the same QR on a new "Event" scanner counter. Judging/results/certificates = part B.
   Add v2.8 to both Supabase databases after tests pass (same pattern as before).
+- Oct 25, 2026 (answer to the plan's question): for paid **team** events the **captain pays once per team** (event fee +
+  ₹5 platform fee), one order per team.
 
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.

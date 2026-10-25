@@ -31,7 +31,8 @@ export async function GET(req: Request) {
   const session = await scannerSessionExpiry();
   const expiresAt = session && session < keysEnd ? session : keysEnd;
 
-  const roles: readonly SealRole[] = f.manager ? ROLES : f.counters;
+  // The Event counter is online-only (no sealed section): only gate/lunch/stay keys are handed out.
+  const roles: readonly SealRole[] = f.manager ? ROLES : f.counters.filter((c) => c !== 'event') as SealRole[];
   return NextResponse.json({
     festId, startsOn: f.starts_on, endsOn: f.ends_on, epoch: f.qr_epoch, expiresAt: expiresAt.toISOString(),
     ...scannerKeys(festId, roles, f.qr_epoch),

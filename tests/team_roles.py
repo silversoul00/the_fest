@@ -27,14 +27,14 @@ q(f"update fests set upi_enabled = true, upi_vpa = coalesce(upi_vpa, 'neonutsav@
 q(f"update fest_roles set scope_day = '{TOMORROW}' where email = 'judge@seed.thefest.in'")  # "Not today" whatever the seed's clock
 
 # Expected tabs per role (plan 4.2). '' = Overview.
-ALL = ['', '/tickets', '/sales', '/analytics', '/payments', '/schedule', '/team', '/announcements', '/sponsors', '/settings']
+ALL = ['', '/tickets', '/sales', '/analytics', '/payments', '/schedule', '/events', '/team', '/announcements', '/sponsors', '/settings']
 ACCOUNTS = {
     'owner': ('organizer@thefest.in', ALL, True),
     'co_organizer': ('cohost@seed.thefest.in', ALL, True),
     'finance': ('finance@seed.thefest.in', ['', '/sales', '/analytics', '/payments'], True),
     'sponsorship': ('sponsorlead@seed.thefest.in', ['', '/analytics', '/sponsors'], False),
-    'media+judge': ('media@seed.thefest.in', ['', '/analytics', '/schedule', '/announcements'], False),
-    'event_head': ('eventhead@seed.thefest.in', ['', '/schedule'], False),
+    'media+judge': ('media@seed.thefest.in', ['', '/analytics', '/schedule', '/events', '/announcements'], False),  # v2.8: judges open Events
+    'event_head': ('eventhead@seed.thefest.in', ['', '/schedule', '/events'], False),
     'desk': ('deskvol@seed.thefest.in', ['/sales'], False),
     'vol_gate': ('volunteer@thefest.in', [], False),
 }
@@ -58,6 +58,7 @@ async def main():
         tmp = tempfile.mkdtemp()
         try:
             shutil.copytree(f'{ROOT}/src/app/organizer', f'{tmp}/src/app/organizer')
+            shutil.copytree(f'{ROOT}/src/app/(student)/my-events', f'{tmp}/src/app/(student)/my-events')  # v2.8: guard checks student event actions too
             a = open(f'{tmp}/src/app/organizer/actions.ts').read()
             open(f'{tmp}/src/app/organizer/actions.ts', 'w').write(a.replace("await requirePerm(fd, 'schedule');\n  const { fest } = g;\n  const [e]", "{ fest: { id: s(fd, 'festId') } };\n  const [e]", 1))
             pth = f'{tmp}/src/app/organizer/[festId]/analytics/page.tsx'

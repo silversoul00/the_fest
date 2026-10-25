@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { sql } from '@/lib/db';
-import { pageAccess, rolesReady, ROLES_MISSING } from '@/lib/fest-access';
+import { eventsReady, pageAccess, rolesReady, ROLES_MISSING } from '@/lib/fest-access';
 import { ROLE_HINT, ROLE_KEYS, ROLE_LABEL, VOLUNTEER_ROLES, isRoleKey } from '@/lib/roles';
 import { STATUS_TEXT, teamOf, type TeamRow } from '@/lib/team';
 import { dateRange, dayLabel, initials, num, time, todayIST } from '@/lib/format';
@@ -29,6 +29,8 @@ export default async function Team({ params, searchParams }: {
   ]);
   const canCoorg = access.perms.has('team_coorg');
   const today = todayIST();
+  // v2.8: Event heads / Judges can be linked to one event
+  const events = (await eventsReady()) ? await sql<{ id: string; title: string }[]>`select id, title from events where fest_id = ${fest.id} order by starts_at, title` : [];
 
   // One card per person; the owner's own extra roles (e.g. a gate shift) go on the Owner card
   const ownerEmail = owner.email.toLowerCase();
@@ -131,6 +133,14 @@ export default async function Team({ params, searchParams }: {
               {ROLE_KEYS.filter((r) => canCoorg || (r !== 'co_organizer' && r !== 'finance')).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]} — {ROLE_HINT[r]}</option>)}
             </select>
           </label>
+          {events.length > 0 && (
+            <label className="field"><span>Event (for an Event head or Judge)</span>
+              <select className="select" name="event_id" defaultValue="" style={{ width: '100%' }}>
+                <option value="">Not linked to an event</option>
+                {events.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}
+              </select>
+            </label>
+          )}
           <div className="form-row">
             <label className="field"><span>Only for (optional)</span><input className="input" name="scope_label" placeholder="e.g. Battle of Bands" maxLength={60} /></label>
             <label className="field"><span>Only on this day (optional)</span>

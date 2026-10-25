@@ -21,7 +21,7 @@ export default async function Overview({ params, searchParams }: { params: Promi
     sql<{ d: string; qty: number }[]>`
       select to_char(g.d, 'YYYY-MM-DD') as d, coalesce(sum(o.qty), 0)::int as qty
       from generate_series((now() at time zone 'Asia/Kolkata')::date - 13, (now() at time zone 'Asia/Kolkata')::date, '1 day') g(d)
-      left join orders o on o.fest_id = ${fest.id} and o.status = 'paid' and (o.paid_at at time zone 'Asia/Kolkata')::date = g.d
+      left join orders o on o.fest_id = ${fest.id} and o.status = 'paid' and (o.paid_at at time zone 'Asia/Kolkata')::date = g.d and not exists (select 1 from ticket_types x where x.id = o.ticket_type_id and x.kind = 'event')
       group by g.d order by g.d`,
     sql<{ h: number; n: number }[]>`
       select extract(hour from created_at at time zone 'Asia/Kolkata')::int as h, count(*)::int as n
@@ -39,7 +39,7 @@ export default async function Overview({ params, searchParams }: { params: Promi
     (await rolesReady()) ? sql<{ total: number; inn: number }[]>`
       select count(distinct email)::int as total, count(distinct email) filter (where checked_in_at is not null)::int as inn
       from fest_roles where fest_id = ${fest.id} and role in ('vol_gate', 'vol_lunch', 'vol_stay', 'desk')` : [{ total: 0, inn: 0 }],
-    sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active`,
+    sql<{ n: number }[]>`select count(*)::int n from ticket_types where fest_id = ${fest.id} and active and kind <> 'event'`,
   ]);
 
   const pct = stats.tickets ? Math.round((stats.checked_in / stats.tickets) * 100) : 0;

@@ -22,7 +22,7 @@ export default async function Sales({ params, searchParams }: { params: Promise<
 
   const [byType, toSend, [{ total }]] = await Promise.all([
     sql<{ name: string; qty: number; gross: number; fees: number }[]>`
-      select tt.name, (case when tt.kind = 'addon' then (select count(*) from orders a where a.ticket_type_id = tt.id and a.status = 'paid')
+      select tt.name, (case when tt.kind in ('addon', 'event') then (select count(*) from orders a where a.ticket_type_id = tt.id and a.status = 'paid')
                             else (select count(*) from tickets t where t.ticket_type_id = tt.id and t.status <> 'void') end)::int qty,
              coalesce(sum(o.amount_paise - o.refunded_paise), 0)::int gross, coalesce(sum(o.platform_fee_paise + o.gateway_fee_paise), 0)::int fees
       from ticket_types tt left join orders o on o.ticket_type_id = tt.id and o.status in ('paid', 'refunded')
@@ -39,7 +39,7 @@ export default async function Sales({ params, searchParams }: { params: Promise<
   const page = Math.min(asked, pages);
   const orders = await sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string; codes: string | null }[]>`
       select o.id, o.paid_at as created_at, o.qty, o.amount_paise, o.platform_fee_paise, o.provider, o.status, o.refunded_paise, o.refund_status, o.utr,
-             case when o.addon_for is not null then (o.status = 'paid')::int
+             case when o.addon_for is not null or tt.kind = 'event' then (o.status = 'paid')::int
                   else (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int end as unused,
              u.name, u.email::text, u.college, tt.name as type,
              (select string_agg(t.code, ' ' order by t.code) from tickets t where t.order_id = o.id and t.status <> 'void') as codes

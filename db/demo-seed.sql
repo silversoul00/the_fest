@@ -225,3 +225,81 @@ begin
     (f_hack, chai, 'org_to_brand', 'Chai Point Express', 'Partner', 3000000, null, '36 hours of hacking needs a lot of chai!', 'declined', 'Our budget for this quarter is used up.', org1, chai, null, now() - interval '3 days', now() - interval '1 day'),
     (f_kalaa, chai, 'brand_to_org', 'Chai Point Express', 'Partner', 2500000, null, null, 'withdrawn', null, chai, chai, null, now() - interval '3 days', now() - interval '1 day');
 end $$;
+
+-- v2.8 events demo (needs v2.8; scripts/seed.mjs runs this same block). Neon Utsav: a solo free event, a solo paid
+-- event, a paid team event that allows mixed colleges (one paid team, one still forming), a nearly full event, a closed
+-- one, and the events the seeded Event head / Judges are linked to.
+do $$
+declare
+  f uuid := (select id from fests where slug = 'neon-utsav');
+  d0 date := (now() at time zone 'Asia/Kolkata')::date;
+  ev uuid; reg uuid;
+  u uuid; i int;
+  fee int := 500;   -- ₹5 platform fee per paid entry
+begin
+  if f is null or exists (select 1 from events where fest_id = f) then return; end if;
+  -- name, category, day, hour, venue, team_min, team_max, price (paise), slots, deadline (hours from day start, null = start), mixed, needs_ticket, rules, prize
+  create temp table _ev (k text, title text, cat text, d int, h int, venue text, tmin int, tmax int, price int, slots int, dl_day int, dl_h int, mixed bool, needs bool, rules text, prize text) on commit drop;
+  insert into _ev values
+    ('sing', 'Solo Singing', 'cultural', 1, 11, 'Indie Stage', 1, 1, 0, 40, 1, 10, true, false, 'One song, up to 5 minutes. Karaoke tracks allowed.', 'Trophy + ₹5,000'),
+    ('standup', 'Stand-up Comedy Open', 'literary', 1, 15, 'Seminar Hall', 1, 1, 10000, 20, 1, 12, true, true, 'Clean sets only, 6 minutes each.', '₹10,000'),
+    ('bands', 'Battle of Bands', 'cultural', 1, 13, 'Indie Stage', 3, 6, 50000, 12, 1, 9, true, true, 'Original compositions score higher. 20 minutes per band including setup.', '₹25,000 + studio session'),
+    ('bgmi', 'BGMI Showdown', 'gaming', 1, 10, 'Lab Block 2', 1, 1, 0, 8, 1, 8, true, false, 'Bring your own phone. Squad rules announced at the venue.', 'Gaming headsets'),
+    ('case', 'Case Study Challenge', 'management', 1, 10, 'Seminar Hall', 2, 4, 0, 10, 1, 8, false, false, 'Teams from one college. 10-minute pitch + 5 minutes Q&A.', '₹15,000'),
+    ('fashion', 'Fashion Show', 'cultural', 1, 17, 'Main Stage', 4, 8, 0, 15, 1, 12, true, false, 'Theme: Neon Nights. 6 minutes per team.', '₹20,000'),
+    ('hunt', 'Treasure Hunt', 'sports', 0, 11, 'Campus-wide', 2, 4, 0, 30, -1, 20, true, false, 'Clues every 15 minutes.', 'Goodies');
+  insert into ticket_types (fest_id, name, description, price_paise, quota, sold, sort, kind)
+    select f, 'Event: ' || title, '', price, slots, 0, 1000, 'event' from _ev;
+  insert into events (fest_id, category, title, starts_at, venue, rules, prize, team_min, team_max, price_paise, slots, reg_deadline, mixed_colleges, needs_ticket, ticket_type_id)
+    select f, x.cat, x.title, ((d0 + x.d)::timestamp + make_interval(hours => x.h)) at time zone 'Asia/Kolkata', x.venue, x.rules, x.prize, x.tmin, x.tmax, x.price, x.slots,
+           ((d0 + x.dl_day)::timestamp + make_interval(hours => x.dl_h)) at time zone 'Asia/Kolkata', x.mixed, x.needs, t.id
+    from _ev x join ticket_types t on t.fest_id = f and t.kind = 'event' and t.name = 'Event: ' || x.title;
+
+  -- Solo Singing: 5 confirmed; BGMI: 7 of 8 (nearly full); Fashion Show: none yet
+  for i in 1..12 loop
+    select id into u from users where email = 'attendee' || (20 + i) || '@seed.thefest.in';
+    select id into ev from events where fest_id = f and title = case when i <= 5 then 'Solo Singing' else 'BGMI Showdown' end;
+    insert into event_regs (event_id, fest_id, captain_id, status, confirmed_at, created_at) values (ev, f, u, 'confirmed', now() - make_interval(hours => i), now() - make_interval(hours => i)) returning id into reg;
+    insert into event_members (reg_id, event_id, email, user_id, status, invited_at, joined_at) select reg, ev, email, id, 'joined', now() - make_interval(hours => i), now() - make_interval(hours => i) from users where id = u;
+  end loop;
+
+  -- Stand-up (₹100 + ₹5, needs a fest ticket): two paid entries by ticket holders, one marked present
+  select id into ev from events where fest_id = f and title = 'Stand-up Comedy Open';
+  for u in select t.user_id from tickets t join users x on x.id = t.user_id
+           where t.fest_id = f and t.status <> 'void' and x.email like 'attendee%' group by t.user_id order by min(x.email) limit 2 loop
+    insert into event_regs (event_id, fest_id, captain_id, status, confirmed_at) values (ev, f, u, 'confirmed', now() - interval '3 hours') returning id into reg;
+    insert into event_members (reg_id, event_id, email, user_id, status, joined_at) select reg, ev, email, id, 'joined', now() - interval '3 hours' from users where id = u;
+    insert into orders (user_id, fest_id, ticket_type_id, qty, amount_paise, platform_fee_paise, gateway_fee_paise, provider, method, status, paid_at, created_at, registration_id)
+      select u, f, e.ticket_type_id, 1, 10000 + fee + ceil((10000 + fee) * 0.0236 / (1 - 0.0236))::int, fee, ceil((10000 + fee) * 0.0236 / (1 - 0.0236))::int,
+             'demo', 'gateway', 'paid', now() - interval '3 hours', now() - interval '3 hours', reg from events e where e.id = ev;
+  end loop;
+  update event_members set checked_in_at = now() - interval '20 minutes'
+    where id = (select m.id from event_members m where m.event_id = ev order by m.joined_at, m.id limit 1);
+
+  -- Battle of Bands (₹500 per team + ₹5, mixed colleges, needs a fest ticket): one paid team of 4, one team forming (2 joined + 1 invite)
+  select id into ev from events where fest_id = f and title = 'Battle of Bands';
+  create temp table _band on commit drop as
+    select t.user_id, min(x.email) as email from tickets t join users x on x.id = t.user_id
+    where t.fest_id = f and t.status <> 'void' and x.email like 'attendee%'
+      and not exists (select 1 from event_members m where m.user_id = t.user_id and m.event_id = ev)
+    group by t.user_id order by min(x.email) desc limit 6;
+  insert into event_regs (event_id, fest_id, captain_id, team_name, status, confirmed_at)
+    values (ev, f, (select user_id from _band order by email limit 1), 'The Neon Riffs', 'confirmed', now() - interval '1 day') returning id into reg;
+  insert into event_members (reg_id, event_id, email, user_id, status, joined_at)
+    select reg, ev, b.email, b.user_id, 'joined', now() - interval '1 day' from (select * from _band order by email limit 4) b;
+  insert into orders (user_id, fest_id, ticket_type_id, qty, amount_paise, platform_fee_paise, gateway_fee_paise, provider, method, status, paid_at, created_at, registration_id)
+    select (select user_id from _band order by email limit 1), f, e.ticket_type_id, 1, 50000 + fee + ceil((50000 + fee) * 0.0236 / (1 - 0.0236))::int, fee,
+           ceil((50000 + fee) * 0.0236 / (1 - 0.0236))::int, 'demo', 'gateway', 'paid', now() - interval '1 day', now() - interval '1 day', reg from events e where e.id = ev;
+  insert into event_regs (event_id, fest_id, captain_id, team_name, status)
+    values (ev, f, (select user_id from _band order by email offset 4 limit 1), 'Bass Drop Crew', 'forming') returning id into reg;
+  insert into event_members (reg_id, event_id, email, user_id, status, joined_at)
+    select reg, ev, b.email, b.user_id, 'joined', now() - interval '2 hours' from (select * from _band order by email offset 4 limit 2) b;
+  insert into event_members (reg_id, event_id, email, user_id, status) values (reg, ev, 'newbandmate@seed.thefest.in', null, 'invited');
+
+  -- Slot counters = confirmed entries
+  update ticket_types t set sold = (select count(*) from event_regs r join events e on e.id = r.event_id where e.ticket_type_id = t.id and r.status = 'confirmed')
+    where t.fest_id = f and t.kind = 'event';
+  -- The seeded Event head and Judges work their events
+  update fest_roles r set event_id = e.id, scope_label = e.title from events e
+    where r.fest_id = f and e.fest_id = f and r.role in ('event_head', 'judge') and r.scope_label = e.title;
+end $$;

@@ -7,7 +7,7 @@ import { stripTypeScriptTypes } from 'node:module';
 const src = readFileSync(new URL('../src/lib/pricing.ts', import.meta.url), 'utf8');
 const js = stripTypeScriptTypes(src);
 const mod = await import('data:text/javascript,' + encodeURIComponent(js));
-const { quote, perTicketFee } = mod;
+const { quote, perTicketFee, eventFeeConfig, EVENT_FEE_PAISE } = mod;
 
 const base = { mode: 'flat', flatPaise: 2000, percent: 5, minPaise: 800, maxPaise: 3000, payer: 'student', gatewayRate: 0.0236, passGateway: true };
 
@@ -33,5 +33,16 @@ assert.equal(perTicketFee(100000, pct), 3000); // 5% of ₹1000 = ₹50 → cap 
 // Organizer pays: student pays ticket price (+ gateway)
 q = quote(25000, 1, { ...base, payer: 'organizer', passGateway: false }, 'gateway');
 assert.equal(q.total, 25000);
+
+// v2.8 event entry: ₹200 → ₹200 + ₹5 fee + gateway gross-up (student pays the fee even if tickets are organizer-paid)
+assert.equal(EVENT_FEE_PAISE, 500);
+const ev = eventFeeConfig({ ...base, mode: 'percent', payer: 'organizer' });
+q = quote(20000, 1, ev, 'gateway');
+assert.equal(q.fee, 500); assert.equal(q.subtotal, 20000);
+assert.equal(q.gatewayFee, Math.ceil((20500 * 0.0236) / (1 - 0.0236)));
+assert.ok(Math.abs(q.total - Math.round(q.total * 0.0236) - 20500) <= 1);
+q = quote(20000, 1, ev, 'upi_direct');
+assert.equal(q.total, 20500); assert.equal(q.gatewayFee, 0);
+assert.equal(quote(0, 1, ev, 'gateway').total, 0);   // free event: no fee
 
 console.log('✓ pricing checks passed');

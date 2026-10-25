@@ -8,6 +8,7 @@
 // Demo logins (password: password123)
 //   student@thefest.in · organizer@thefest.in · sponsor@thefest.in · volunteer@thefest.in
 import { randomBytes, randomInt } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
 import postgres from 'postgres';
 import { loadEnv } from './env.mjs';
@@ -196,6 +197,11 @@ try {
   await sql`insert into fest_activity (fest_id, actor_id, actor_email, actor_role, action, summary) values
     (${festIds['neon-utsav']}, ${organizer}, 'organizer@thefest.in', 'owner', 'role.add', 'Added Farah Finance as Finance lead'),
     (${festIds['neon-utsav']}, ${organizer}, 'organizer@thefest.in', 'owner', 'role.add', 'Added Meera Media as Media / PR')`;
+
+  // v2.8 events at Neon Utsav: the same block as db/demo-seed.sql (one source for both seeds)
+  const demoSql = readFileSync(new URL('../db/demo-seed.sql', import.meta.url), 'utf8');
+  const evBlock = demoSql.slice(demoSql.indexOf('-- v2.8 events demo'));
+  await sql.unsafe(evBlock);
 
   // Check-ins: Neon Utsav day 1 + today; Goal Rush all-but-few
   const gates = ['Gate 1', 'Gate 2', 'Gate 3'];
