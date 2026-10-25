@@ -100,4 +100,9 @@ python3 tests/team_roles_fix1.py
 # captain pays once), races (10 registrations on 1 slot, 6 accepts on a 3-max team, two teams at once), refunds and fest
 # cancel, event head / judge scope, Event counter, CSV, activity log, 390px, old database without v2.8 (:3009)
 python3 tests/events.py
+# Fest events fix round 1 (2026-10-25-fest-events-review-1 / -test-1): abandoned payments free the slot and unfreeze the
+# team (card 15 min, bank UPI 30 min, UTR kept), no deadlock between a late webhook and a new checkout, CSV (no ₹ without
+# money, one payment per team, no invitees), "entry" wording, UTR-sent message, messages that outlive their form,
+# no name before accepting, no Remove on paid entries, scanner wording, can_scan per event, Sales ticket total, date default
+python3 tests/events_fix1.py
 echo "✓ Release check passed"

@@ -10,7 +10,7 @@ type Counts = { inn: number; total: number; mine: number };
 type Counter = 'gate' | 'lunch' | 'stay' | 'event';
 type Verdict = {
   result: 'admitted' | 'duplicate' | 'invalid' | 'wrong_fest' | 'void' | 'offline';
-  message: string; holder?: string; type?: string; code?: string; checkedInAt?: string; gate?: string | null;
+  message: string; headline?: string; holder?: string; type?: string; code?: string; checkedInAt?: string; gate?: string | null;
   live?: LiveState | null; counts?: Counts; error?: string;
 };
 type FeedItem = Verdict & { at: number; note?: string };
@@ -381,7 +381,7 @@ export function Scanner({ counter, counters, fests, festId, festName, defaultGat
 
         {verdict && (
           <div className={`verdict ${verdict.result}`} role="status" aria-live="assertive" onClick={() => setVerdict(null)}>
-            <div className="big">{counter === 'stay' && verdict.result === 'duplicate' && verdict.message.startsWith('Just checked in') ? '⚠ Just checked in' : TITLE[counter][verdict.result]}</div>
+            <div className="big">{verdict.headline ? verdict.headline : counter === 'stay' && verdict.result === 'duplicate' && verdict.message.startsWith('Just checked in') ? '⚠ Just checked in' : TITLE[counter][verdict.result]}</div>
             {verdict.holder && <div className="mt8" style={{ color: 'var(--white)', fontSize: 18 }}>{verdict.holder}</div>}
             <div className="small mt8">
               {verdict.type ? `${verdict.type} · ` : ''}{verdict.message}

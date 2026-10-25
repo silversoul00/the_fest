@@ -3,7 +3,8 @@ import { sql } from '@/lib/db';
 import { eventAllowed, eventPageAccess } from '@/lib/fest-access';
 import { dayLabel, rupees, time } from '@/lib/format';
 import { EVENT_CATEGORY_LABEL, istDate, istTime, teamText, type EventCategory } from '@/lib/event-format';
-import { ActionForm, Submit } from '@/components/forms';
+import { ActionForm, FlashMessage, Submit } from '@/components/forms';
+import { holdLive, takenLive } from '@/lib/holds';
 import { deleteFestEvent, markEventPresent, removeEventEntry, toggleFestEvent, updateFestEvent } from '../../../events-actions';
 import { EventFields } from '../EventFields';
 
@@ -24,16 +25,16 @@ export default async function EventPage({ params }: { params: Promise<{ festId: 
   const all = access.perms.has('events');
   const money = access.perms.has('money');  // no ₹ for roles without money (event heads, judges)
   const [e] = await sql<Ev[]>`
-    select e.*, tt.sold as taken, (select count(*) from event_regs r where r.event_id = e.id)::int as entries
+    select e.*, ${takenLive(sql)} as taken, (select count(*) from event_regs r where r.event_id = e.id)::int as entries
     from events e join ticket_types tt on tt.id = e.ticket_type_id where e.id = ${eventId}`;
   const entries = await sql<Entry[]>`
     select r.id, r.team_name, r.status, u.name as captain,
            (select o.amount_paise - o.refunded_paise from orders o where o.registration_id = r.id and o.status in ('paid', 'refunded') order by o.created_at desc limit 1) as paid,
-           exists (select 1 from orders o where o.registration_id = r.id and o.status = 'pending') as pending
+           exists (select 1 from orders o where o.registration_id = r.id and ${holdLive(sql)}) as pending
     from event_regs r join users u on u.id = r.captain_id
     where r.event_id = ${eventId} order by (r.status = 'confirmed') desc, r.created_at`;
   const members = await sql<Member[]>`
-    select m.id, m.reg_id, u.name, m.email::text, u.college, m.status, m.checked_in_at, (m.user_id = r.captain_id) as is_captain
+    select m.id, m.reg_id, case when m.status = 'joined' then u.name end as name, m.email::text, case when m.status = 'joined' then u.college end as college, m.status, m.checked_in_at, (m.user_id = r.captain_id) as is_captain
     from event_members m join event_regs r on r.id = m.reg_id left join users u on u.id = m.user_id
     where m.event_id = ${eventId} and m.status in ('joined', 'invited') order by m.invited_at`;
   const confirmed = entries.filter((x) => x.status === 'confirmed').length;
@@ -53,6 +54,7 @@ export default async function EventPage({ params }: { params: Promise<{ festId: 
         <div className="stat" style={{ padding: 12 }}><div className="label">Present</div><div className="v" style={{ fontSize: 26 }}>{members.filter((m) => m.checked_in_at).length}</div></div>
       </div>
 
+      <FlashMessage />
       <section className="card" id="entries">
         <div className="row between g8 wrap-row mb16">
           <div className="h3">Entries</div>
@@ -82,8 +84,9 @@ export default async function EventPage({ params }: { params: Promise<{ festId: 
                       )}
                   </div>
                 ))}
-                {manage && (r.status === 'confirmed' || r.status === 'forming') && (
-                  <ActionForm action={removeEventEntry} className="row g8">
+                {manage && r.paid !== null && r.status === 'confirmed' && <p className="xs muted">Paid entry — {money ? 'cancel it with a refund from Sales.' : 'the owner or Finance lead can refund it from Sales.'}</p>}
+                {manage && r.paid === null && (r.status === 'confirmed' || r.status === 'forming') && (
+                  <ActionForm action={removeEventEntry} className="row g8" flash>
                     <input type="hidden" name="festId" value={fest.id} /><input type="hidden" name="eventId" value={eventId} /><input type="hidden" name="regId" value={r.id} />
                     <Submit className="btn text xs" pendingText="Removing…">Remove entry</Submit>
                   </ActionForm>

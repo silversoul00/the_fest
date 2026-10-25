@@ -1,5 +1,5 @@
 # Ticket transfer + co-organizers.
-import asyncio, os, subprocess, sys
+import asyncio, os, subprocess, sys, time
 from playwright.async_api import async_playwright
 B = os.environ.get('E2E_BASE', 'http://localhost:3000')
 DB = os.environ.get('E2E_PSQL', 'psql -h /tmp -U postgres thefest')
@@ -7,6 +7,12 @@ results = []
 def check(name, cond, extra=''):
     results.append((name, bool(cond))); print(('PASS ' if cond else 'FAIL ') + name + (f'  [{extra}]' if extra else ''))
 def q(sql): return subprocess.run(DB + ' -qtAc "' + sql + '"', shell=True, capture_output=True, text=True).stdout.strip()
+def q_until(sql, want, secs=8):  # emails are sent in the background after the response: wait up to `secs` for `want`
+    end = time.time() + secs
+    while True:
+        v = q(sql)
+        if v == want or time.time() > end: return v
+        time.sleep(0.25)
 
 async def login(b, email):
     pg = await (await b.new_context()).new_page()
@@ -61,7 +67,7 @@ async def main():
         await st.goto(f'{B}/tickets/{tid}')
         check('old ticket page shows it is no longer valid', 'no longer valid' in await st.text_content('main'))
         check('old ticket shows no QR', await st.locator('[aria-label="Ticket QR code"]').count() == 0)
-        check('recipient emailed', q("select count(*) from email_outbox where to_email='volunteer@thefest.in' and subject like '%sent you a ticket%'") == '1')
+        check('recipient emailed', q_until("select count(*) from email_outbox where to_email='volunteer@thefest.in' and subject like '%sent you a ticket%'", '1') == '1')
         vo = await login(b, 'volunteer@thefest.in')
         await vo.goto(f'{B}/tickets/{new}')
         check('recipient sees new ticket with QR', await vo.locator('[aria-label="Ticket QR code"]').count() == 1)
@@ -86,7 +92,7 @@ async def main():
         q(f"delete from fest_roles where fest_id='{hv}' and email='attendee5@seed.thefest.in'")
         t = await add_role(own, 'organizer2@thefest.in', 'co_organizer', 'can start now')
         check('owner adds co-organizer', 'Co-organizer' in t, t)
-        check('co-organizer emailed', q("select count(*) from email_outbox where to_email='organizer2@thefest.in' and subject ilike '%co-organizer%'") == '1')
+        check('co-organizer emailed', q_until("select count(*) from email_outbox where to_email='organizer2@thefest.in' and subject ilike '%co-organizer%'", '1') == '1')
 
         await co.goto(f'{B}/organizer')
         check('co-organizer sees the fest in their list', await co.locator('text=HackVerse').count() > 0)

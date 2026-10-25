@@ -24,15 +24,15 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const note = `TF ${o.id.slice(0, 8).toUpperCase()}`;
   return (
     <div className="wrap stack g16" style={{ maxWidth: 440 }}>
-      <Link href="/tickets" className="label">← My tickets</Link>
+      {o.kind === 'event' ? <Link href="/my-events" className="label">← My events</Link> : <Link href="/tickets" className="label">← My tickets</Link>}
       <h1 className="h2">{o.fest}</h1>
-      <p className="soft small">{o.qty} × {o.type} · {rupees(o.amount_paise)}</p>
+      <p className="soft small">{o.kind === 'event' ? `${o.type.replace(/^Event: /, '')} · event entry` : `${o.qty} × ${o.type}`} · {rupees(o.amount_paise)}</p>
       {o.status === 'failed' && !o.utr ? (
-        <div className="alert error">This order expired before payment. Seats were released — please book again.</div>
+        <div className="alert error">{o.kind === 'event' ? 'This payment expired before it was made. Your slot was released — pay again from My events.' : 'This order expired before payment. Seats were released — please book again.'}</div>
       ) : o.utr ? (
-        <div className="alert info">We have your UTR <span className="mono">{o.utr}</span>. Your ticket appears as soon as the fest confirms the payment — usually within minutes.{o.review_flag ? ` Note: ${o.review_flag}` : ''}</div>
+        <div className="alert info">We have your UTR <span className="mono">{o.utr}</span>. Your {o.kind === 'event' ? 'entry is confirmed' : 'ticket appears'} as soon as the fest confirms the payment — usually within minutes.{o.review_flag ? ` Note: ${o.review_flag}` : ''}</div>
       ) : (
-        <ResumeUpi upi={{ orderId: o.id, amount: o.amount_paise, vpa: o.vpa, payee: o.upi_name || o.fest, note, link: upiLink(o.vpa, o.upi_name || o.fest, o.amount_paise, note) }} />
+        <ResumeUpi upi={{ orderId: o.id, amount: o.amount_paise, vpa: o.vpa, payee: o.upi_name || o.fest, note, link: upiLink(o.vpa, o.upi_name || o.fest, o.amount_paise, note) }} entry={o.kind === 'event'} />
       )}
       <Link href={`/fests/${o.slug}`} className="btn outline block">Back to fest</Link>
     </div>

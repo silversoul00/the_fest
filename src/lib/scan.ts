@@ -11,6 +11,8 @@ export type { Counter };
 export type Verdict = {
   result: 'admitted' | 'duplicate' | 'invalid' | 'wrong_fest' | 'void';
   message: string;
+  /** Overrides the scanner's big headline (Event counter: "✕ Team not confirmed yet"). */
+  headline?: string;
   holder?: string;
   type?: string;
   code?: string;

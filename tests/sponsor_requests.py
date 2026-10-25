@@ -67,7 +67,18 @@ async def replay(ctx_req, act):
     r = await ctx_req.post(act['url'], headers={**act['headers'], 'origin': B}, data=act['body'], max_redirects=0)
     return await r.text()
 
-def emails(to, like): return q(f"select count(*) from email_outbox where to_email='{to}' and subject like '%{like}%'")
+def emails(to, like, want='1', secs=8):  # sent in the background after the response: wait up to `secs` for `want`
+    end = time.time() + secs
+    while True:
+        v = q(f"select count(*) from email_outbox where to_email='{to}' and subject like '%{like}%'")
+        if v == want or time.time() > end: return v
+        time.sleep(0.25)
+def body_until(sql, secs=8):
+    end = time.time() + secs
+    while True:
+        v = q(sql)
+        if v or time.time() > end: return v
+        time.sleep(0.25)
 def email_bodies(to): return q(f"select coalesce(string_agg(body_text, ' '),'') from email_outbox where to_email='{to}'")
 
 class Server:  # an extra server against another database (same pattern as tests/sponsor_leads.py)
@@ -288,7 +299,7 @@ async def main():
                   rows[0].split('|')[1:] == ['Chai Point Express', 'Title', '20000000', 'SRCHAI01'], rows)
             check('7. request is linked to that sponsor row', q(f"select sponsor_id from sponsor_requests where id='{vr}'") == sid2)
             await ch.wait_for_timeout(800)
-            body = q("select body_text from email_outbox where to_email='brand@seed.thefest.in' and subject like '%Kalaa%confirmed%' order by id desc limit 1")
+            body = body_until("select body_text from email_outbox where to_email='brand@seed.thefest.in' and subject like '%Kalaa%confirmed%' order by id desc limit 1")
             check('the accepted email matches the sponsor row (Title, ₹2,00,000)', 'Title sponsor' in body and '2,00,000' in body, body[:200])
             await co.goto(f'{B}/organizer/{kalaa}/sponsors')
             check('the organizer sponsors list shows the accepted deal', '2,00,000' in await co.locator(f'[data-sponsor="{sid2}"]').inner_text())
@@ -344,7 +355,7 @@ async def main():
             await nw.fill(f'[data-request="{hr}"] input[name=reply]', 'Not this time'); await nw.click(f'[data-request="{hr}"] button:has-text("Decline request")')
             check('decline with a note', await badge(nw, hr, 'Declined') and q(f"select status||'|'||reply from sponsor_requests where id='{hr}'") == 'declined|Not this time')
             await nw.wait_for_timeout(800)
-            check('decline emails the sender with the note', 'Not this time' in q("select body_text from email_outbox where to_email='organizer@thefest.in' and subject like '%declined%' order by id desc limit 1"))
+            check('decline emails the sender with the note', 'Not this time' in body_until("select body_text from email_outbox where to_email='organizer@thefest.in' and subject like '%declined%' order by id desc limit 1"))
             await org.goto(f'{B}/organizer/{hack}/sponsors?to={nb}'); await org.fill('#send input[name=amount]', '50000'); await org.click('#send button:has-text("Send request")')
             check('5. re-sending within 7 days of a decline is refused', await alert(org, 'declined in the last 7 days'))
             check('12. organizer sponsors tab at 390px: no sideways scroll, request/brand buttons ≥44px',

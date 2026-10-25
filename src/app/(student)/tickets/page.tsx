@@ -33,9 +33,9 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
     where t.user_id = ${user.id} and t.status <> 'void'
     order by f.starts_on asc, t.issued_at asc`;
 
-  const pending = await sql<{ id: string; fest_name: string; qty: number; amount_paise: number; utr: string | null; review_flag: string | null }[]>`
-    select o.id, f.name as fest_name, o.qty, o.amount_paise, o.utr, o.review_flag
-    from orders o join fests f on f.id = o.fest_id
+  const pending = await sql<{ id: string; fest_name: string; qty: number; amount_paise: number; utr: string | null; review_flag: string | null; kind: string }[]>`
+    select o.id, f.name as fest_name, o.qty, o.amount_paise, o.utr, o.review_flag, tt.kind
+    from orders o join fests f on f.id = o.fest_id join ticket_types tt on tt.id = o.ticket_type_id
     where o.user_id = ${user.id} and o.method = 'upi_direct'
       and (o.status = 'pending' or (o.status = 'failed' and o.utr is not null and o.review_flag is not null and o.review_flag not like 'Rejected%'))
       and o.created_at > now() - interval '7 days'
@@ -72,7 +72,7 @@ export default async function MyTickets({ searchParams }: { searchParams: Promis
         <Link key={p.id} href={`/orders/${p.id}`} className="card link row g12" style={{ borderColor: 'rgba(255,224,52,.3)' }}>
           <span style={{ fontSize: 24 }}>⏳</span>
           <span className="grow">
-            <strong>{p.fest_name}</strong> · {p.qty} ticket{p.qty > 1 ? 's' : ''} · <span className="mono">{rupees(p.amount_paise)}</span>
+            <strong>{p.fest_name}</strong> · {p.kind === 'event' ? 'event entry' : `${p.qty} ticket${p.qty > 1 ? 's' : ''}`} · <span className="mono">{rupees(p.amount_paise)}</span>
             <span className="xs muted" style={{ display: 'block' }}>
               {p.utr ? (p.review_flag ? `Organizer is checking: ${p.review_flag}` : 'UTR sent — we’ll confirm once the payment is seen in the fest’s account.') : 'Waiting for your UPI payment — tap to pay or enter the UTR'}
             </span>

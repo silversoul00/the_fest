@@ -2,6 +2,8 @@ import 'server-only';
 import type postgres from 'postgres';
 import { sql } from './db';
 import { sameCollege } from './event-format';
+import { activeRole } from './fest-access';
+import { holdLive, releaseHolds } from './holds';
 import { time } from './format';
 import type { User } from './types';
 
@@ -27,11 +29,15 @@ const EV_COLS = (tx: Tx) => tx`
   e.id, e.fest_id, e.title, e.price_paise, e.team_min, e.team_max, e.slots, e.reg_deadline, e.mixed_colleges, e.needs_ticket,
   e.active, e.ticket_type_id, e.starts_at, tt.sold, tt.quota, f.status::text as fest_status, f.name as fest_name`;
 
-/** Lock the event's slot counter (first lock of every write) and return the event. */
+/**
+ * Lock the event's slot counter (first lock of every write) and return the event. Expired payment holds are released
+ * here (same 15/30-minute rule as tickets), so an abandoned checkout never keeps a slot taken or a team frozen.
+ */
 async function lockEvent(tx: Tx, eventId: string): Promise<EvRow | undefined> {
   const [e] = await tx<EvRow[]>`
     select ${EV_COLS(tx)} from events e join ticket_types tt on tt.id = e.ticket_type_id join fests f on f.id = e.fest_id
     where e.id = ${eventId} for update of tt`;
+  if (e) e.sold = Math.max(e.sold - (await releaseHolds(tx, e.ticket_type_id)), 0);
   return e;
 }
 
@@ -52,7 +58,8 @@ const notOpen = (e: EvRow) =>
 const joinedCount = async (tx: Tx, regId: string) =>
   (await tx<{ n: number }[]>`select count(*)::int n from event_members where reg_id = ${regId} and status = 'joined'`)[0].n;
 const openOrder = async (tx: Tx, regId: string) =>
-  (await tx<{ status: string }[]>`select status::text from orders where registration_id = ${regId} and status in ('pending', 'paid') limit 1`)[0]?.status;
+  (await tx<{ status: string }[]>`select o.status::text from orders o where o.registration_id = ${regId} and (o.status = 'paid' or ${holdLive(tx, 'o')})
+                                  order by (o.status = 'paid') desc limit 1`)[0]?.status;
 const isUnique = (e: unknown) => (e as { code?: string })?.code === '23505';
 const ALREADY = 'You’re already in a team for this event.';
 
@@ -311,16 +318,20 @@ export async function markPresentByTicket(opts: { festId: string; eventId: strin
       where m.user_id = ${t.user_id} and e.fest_id = ${opts.festId} and m.status = 'joined' and r.status = 'confirmed' order by e.starts_at`;
     return { result: 'invalid' as const, message: `Not registered for ${ev.title}${other.length ? ` — registered for ${other.map((o) => o.title).join(', ')}` : ''}`, ...who };
   }
-  if (m.reg_status !== 'confirmed') return { result: 'invalid' as const, message: 'Entry not confirmed', ...who };
+  if (m.reg_status !== 'confirmed') {
+    const what = m.team_name ? 'Team' : 'Entry';
+    return { result: 'invalid' as const, headline: `✕ ${what} not confirmed yet`, message: m.team_name ? `“${m.team_name}” hasn’t been submitted or paid` : 'Not paid yet', type: ev.title, ...who };
+  }
   const up = await sql`update event_members set checked_in_at = now(), checked_in_by = ${opts.scannerId}
                        where id = ${m.id} and checked_in_at is null returning id`;
   const [c] = await sql<{ here: number; joined: number; at: Date | null }[]>`
     select (count(*) filter (where checked_in_at is not null))::int here, count(*)::int joined,
            (select checked_in_at from event_members where id = ${m.id}) at
     from event_members where reg_id = ${m.reg_id} and status = 'joined'`;
-  const team = m.team_name ? `${m.team_name} (${c.here}/${c.joined} here)` : ev.title;
-  if (up.length) return { result: 'admitted' as const, message: `Present ✓ — ${team}`, type: ev.title, ...who };
-  return { result: 'duplicate' as const, message: `Already marked${c.at ? ` at ${time(c.at)}` : ''} — ${team}`, type: ev.title, ...who };
+  // The event name is shown once (as `type`); a team adds its name and how many are here
+  const team = m.team_name ? ` — ${m.team_name} (${c.here}/${c.joined} here)` : '';
+  if (up.length) return { result: 'admitted' as const, message: `Present ✓${team}`, type: ev.title, ...who };
+  return { result: 'duplicate' as const, message: `Already marked${c.at ? ` at ${time(c.at)}` : ''}${team}`, type: ev.title, ...who };
 }
 
 /** Event counter numbers: members present at this event, and of those, marked by this scanner. */
@@ -333,12 +344,14 @@ export async function eventCounts(eventId: string, scannerId: string) {
   return c;
 }
 
-/** Events the scanner may use at the Event counter: managers → every event of the fest; event heads → theirs. */
-export async function counterEvents(festId: string, user: Pick<User, 'id' | 'email'>, manager: boolean) {
+/**
+ * Events the scanner may use at the Event counter: managers → every event of the fest; event heads → the events of
+ * their active (confirmed email, today) event-head rows that have scanning switched on.
+ */
+export async function counterEvents(festId: string, user: Pick<User, 'id' | 'email' | 'verified'>, manager: boolean) {
   return sql<{ id: string; title: string }[]>`
     select e.id, e.title from events e where e.fest_id = ${festId}
-      ${manager ? sql`` : sql`and e.id in (select r.event_id from fest_roles r where r.fest_id = ${festId} and r.email = ${user.email}
-                                           and r.role = 'event_head' and r.event_id is not null
-                                           and (r.scope_day is null or r.scope_day = (now() at time zone 'Asia/Kolkata')::date))`}
+      ${manager ? sql`` : sql`and e.id in (select r.event_id from fest_roles r where r.fest_id = ${festId} and ${activeRole(user)}
+                                           and r.role = 'event_head' and r.event_id is not null and r.can_scan)`}
     order by e.starts_at, e.title`;
 }

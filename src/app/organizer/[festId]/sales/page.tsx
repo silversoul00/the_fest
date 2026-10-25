@@ -3,7 +3,7 @@ import { sql } from '@/lib/db';
 import Link from 'next/link';
 import { dayLabel, num, rupees, time } from '@/lib/format';
 import { Empty, Stat } from '@/components/ui';
-import { ActionForm, Submit } from '@/components/forms';
+import { ActionForm, FlashMessage, Submit } from '@/components/forms';
 import { markUpiRefundSent, refundOrderAction } from '../../actions';
 
 const PER_PAGE = 50;
@@ -21,12 +21,12 @@ export default async function Sales({ params, searchParams }: { params: Promise<
                           or exists (select 1 from tickets t where t.order_id = o.id and t.code ilike ${like}))` : sql``}`;
 
   const [byType, toSend, [{ total }]] = await Promise.all([
-    sql<{ name: string; qty: number; gross: number; fees: number }[]>`
-      select tt.name, (case when tt.kind in ('addon', 'event') then (select count(*) from orders a where a.ticket_type_id = tt.id and a.status = 'paid')
+    sql<{ name: string; kind: string; qty: number; gross: number; fees: number }[]>`
+      select tt.name, tt.kind, (case when tt.kind in ('addon', 'event') then (select count(*) from orders a where a.ticket_type_id = tt.id and a.status = 'paid')
                             else (select count(*) from tickets t where t.ticket_type_id = tt.id and t.status <> 'void') end)::int qty,
              coalesce(sum(o.amount_paise - o.refunded_paise), 0)::int gross, coalesce(sum(o.platform_fee_paise + o.gateway_fee_paise), 0)::int fees
       from ticket_types tt left join orders o on o.ticket_type_id = tt.id and o.status in ('paid', 'refunded')
-      where tt.fest_id = ${fest.id} group by tt.id, tt.name, tt.sort order by tt.sort`,
+      where tt.fest_id = ${fest.id} group by tt.id, tt.name, tt.kind, tt.sort order by tt.sort`,
     // Bank-UPI money to send back: refunds, and payments that arrived too late to become tickets
     sql<{ id: string; name: string; email: string; utr: string | null; refunded_paise: number }[]>`
       select o.id, u.name, u.email::text, o.utr, o.refunded_paise
@@ -37,18 +37,19 @@ export default async function Sales({ params, searchParams }: { params: Promise<
   const pages = Math.max(1, Math.ceil(total / PER_PAGE));
   // A page number past the end (an old link, a typed URL) shows the last real page
   const page = Math.min(asked, pages);
-  const orders = await sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string; codes: string | null }[]>`
+  const orders = await sql<{ id: string; created_at: Date; qty: number; amount_paise: number; platform_fee_paise: number; provider: string; status: string; refunded_paise: number; refund_status: string | null; unused: number; utr: string | null; name: string; email: string; college: string | null; type: string; kind: string; codes: string | null }[]>`
       select o.id, o.paid_at as created_at, o.qty, o.amount_paise, o.platform_fee_paise, o.provider, o.status, o.refunded_paise, o.refund_status, o.utr,
              case when o.addon_for is not null or tt.kind = 'event' then (o.status = 'paid')::int
                   else (select count(*) from tickets t where t.order_id = o.id and t.status = 'valid')::int end as unused,
-             u.name, u.email::text, u.college, tt.name as type,
+             u.name, u.email::text, u.college, tt.name as type, tt.kind,
              (select string_agg(t.code, ' ' order by t.code) from tickets t where t.order_id = o.id and t.status <> 'void') as codes
       from orders o join users u on u.id = o.user_id join ticket_types tt on tt.id = o.ticket_type_id
       where ${match}
       order by o.paid_at desc, o.id limit ${PER_PAGE} offset ${(page - 1) * PER_PAGE}`;
   const pageHref = (n: number) => `/organizer/${fest.id}/sales?${new URLSearchParams({ ...(q ? { q } : {}), ...(n > 1 ? { page: String(n) } : {}) })}`;
 
-  const totals = byType.reduce((a, t) => ({ qty: a.qty + t.qty, gross: a.gross + t.gross, fees: a.fees + t.fees }), { qty: 0, gross: 0, fees: 0 });
+  // "Tickets" counts fest tickets only (add-ons and event entries aren't tickets); Collected and payout include all money
+  const totals = byType.reduce((a, t) => ({ qty: a.qty + (t.kind === 'addon' || t.kind === 'event' ? 0 : t.qty), gross: a.gross + t.gross, fees: a.fees + t.fees }), { qty: 0, gross: 0, fees: 0 });
 
   return (
     <div className="stack g16">
@@ -56,9 +57,10 @@ export default async function Sales({ params, searchParams }: { params: Promise<
         <h1 className="h2">Sales</h1>
         {access.perms.has('export') && <a className="btn sm outline" href={`/organizer/${fest.id}/export`} download>⬇ Export CSV</a>}
       </div>
+      <FlashMessage />
 
       {money && <><div className="grid-2 grid-3">
-        <Stat label="Tickets" value={num(totals.qty)} />
+        <Stat label="Tickets" value={num(totals.qty)} sub="event entries and add-ons not counted" />
         <Stat label="Collected" value={rupees(totals.gross, { compact: true })} color="var(--blue)" sub="incl. convenience fees" />
         <Stat label="Your payout" value={rupees(totals.gross - totals.fees, { compact: true })} color="var(--green)" sub={`${rupees(totals.fees, { compact: true })} fees & payment charges`} />
       </div>
@@ -110,11 +112,13 @@ export default async function Sales({ params, searchParams }: { params: Promise<
                     {o.status === 'refunded' ? <span className="badge orange">Refunded</span> : !canRefund ? null : o.unused > 0 ? (
                       <details>
                         <summary className="xs c-red" style={{ cursor: 'pointer' }}>Cancel / refund</summary>
-                        <ActionForm action={refundOrderAction} className="form mt8">
+                        <ActionForm action={refundOrderAction} className="form mt8" flash>
                           <input type="hidden" name="festId" value={fest.id} />
                           <input type="hidden" name="orderId" value={o.id} />
-                          <label className="field"><span>Tickets to cancel (of {o.unused} unused)</span>
-                            <input className="input" type="number" name="tickets" min={1} max={o.unused} defaultValue={o.unused} /></label>
+                          {o.kind === 'event' ? <><input type="hidden" name="tickets" value={1} /><p className="xs soft">Cancels this event entry and refunds it in full. The slot opens again.</p></> : (
+                            <label className="field"><span>Tickets to cancel (of {o.unused} unused)</span>
+                              <input className="input" type="number" name="tickets" min={1} max={o.unused} defaultValue={o.unused} /></label>
+                          )}
                           <label className="field"><span>Reason (student sees this)</span><input className="input" name="reason" placeholder="Requested by student" /></label>
                           <Submit className="btn sm danger">Cancel &amp; refund</Submit>
                           {o.provider === 'upi_direct' && <p className="xs muted">Paid by bank UPI — you’ll send the money back yourself.</p>}

@@ -5,7 +5,8 @@ import { eventsReady, EVENTS_MISSING } from '@/lib/fest-access';
 import { dayLabel, rupees, time } from '@/lib/format';
 import { teamText } from '@/lib/event-format';
 import { activeGateway, eventFees } from '@/lib/payments';
-import { ActionForm, Submit } from '@/components/forms';
+import { ActionForm, FlashMessage, Submit } from '@/components/forms';
+import { holdLive, takenLive } from '@/lib/holds';
 import { Empty } from '@/components/ui';
 import { BuyTickets } from '../fests/[slug]/BuyTickets';
 import { answerInvite, inviteToTeam, leaveEventTeam, removeTeamMember, submitTeam, withdrawMyEntry } from './actions';
@@ -15,18 +16,20 @@ export const metadata = { title: 'My events' };
 type Entry = {
   reg_id: string; status: string; team_name: string | null; captain_id: string; title: string; event_id: string; starts_at: Date; venue: string;
   reg_deadline: Date; team_min: number; team_max: number; price_paise: number; slots: number; taken: number; tt_id: string;
-  fest: string; slug: string; upi: boolean; pending: boolean; paid: boolean; refunded: boolean;
+  fest: string; slug: string; upi: boolean; pending: boolean; utr_sent: boolean; paid: boolean; refunded: boolean;
 };
 type Mem = { id: string; reg_id: string; name: string | null; email: string; status: string; is_captain: boolean; me: boolean; present: boolean };
 
-export default async function MyEvents({ searchParams }: { searchParams: Promise<{ paid?: string }> }) {
+export default async function MyEvents({ searchParams }: { searchParams: Promise<{ paid?: string; utr?: string }> }) {
   const user = await requireUser('student');
   const sp = await searchParams;
   if (!(await eventsReady())) return <div className="wrap"><h1 className="h2 mt8">My events</h1><div className="alert info mt16">{EVENTS_MISSING}</div></div>;
   const entries = await sql<Entry[]>`
     select r.id as reg_id, r.status, r.team_name, r.captain_id, e.title, e.id as event_id, e.starts_at, e.venue, e.reg_deadline, e.team_min, e.team_max,
-           e.price_paise, e.slots, tt.sold as taken, tt.id as tt_id, f.name as fest, f.slug, (f.upi_enabled and f.upi_vpa is not null) as upi,
-           exists (select 1 from orders o where o.registration_id = r.id and o.status = 'pending') as pending,
+           e.price_paise, e.slots, ${takenLive(sql)} as taken, tt.id as tt_id, f.name as fest, f.slug, (f.upi_enabled and f.upi_vpa is not null) as upi,
+           -- a payment still inside its hold (15 min card / 30 min bank UPI; bank UPI with a UTR waits for the fest)
+           exists (select 1 from orders o where o.registration_id = r.id and ${holdLive(sql)}) as pending,
+           exists (select 1 from orders o where o.registration_id = r.id and o.status = 'pending' and o.utr is not null) as utr_sent,
            exists (select 1 from orders o where o.registration_id = r.id and o.status = 'paid') as paid,
            exists (select 1 from orders o where o.registration_id = r.id and o.status = 'refunded') as refunded
     from event_members m join event_regs r on r.id = m.reg_id join events e on e.id = r.event_id
@@ -35,7 +38,7 @@ export default async function MyEvents({ searchParams }: { searchParams: Promise
     order by e.starts_at`;
   const ids = entries.map((e) => e.reg_id);
   const members = ids.length ? await sql<Mem[]>`
-    select m.id, m.reg_id, u.name, m.email::text, m.status, (m.user_id = r.captain_id) as is_captain, (m.user_id = ${user.id}) as me,
+    select m.id, m.reg_id, case when m.status = 'joined' then u.name end as name, m.email::text, m.status, (m.user_id = r.captain_id) as is_captain, (m.user_id = ${user.id}) as me,
            (m.checked_in_at is not null) as present
     from event_members m join event_regs r on r.id = m.reg_id left join users u on u.id = m.user_id
     where m.reg_id in ${sql(ids)} and m.status in ('joined', 'invited') order by m.invited_at` : [];
@@ -51,6 +54,8 @@ export default async function MyEvents({ searchParams }: { searchParams: Promise
     <div className="wrap stack g16 ev-ui" style={{ maxWidth: 640 }}>
       <div className="row between g8 wrap-row mt8"><h1 className="h2">My events</h1><Link href="/tickets" className="btn sm outline">🎟️ My tickets</Link></div>
       {sp.paid && <div className="alert ok" role="status">Payment received — your entry is confirmed.</div>}
+      {sp.utr && !sp.paid && <div className="alert info" role="status" data-utr-sent>UTR sent — we’ll confirm once the payment is seen in the fest’s account.</div>}
+      <FlashMessage />
       {!user.verified && <div className="alert info">Confirm your email to accept team invites.</div>}
 
       {invites.length > 0 && (
@@ -61,8 +66,8 @@ export default async function MyEvents({ searchParams }: { searchParams: Promise
               <div className="wrap-anywhere"><strong>{i.captain}</strong> invited you to {i.team_name ? <>“{i.team_name}” for </> : ''}<strong>{i.title}</strong> · {i.fest}</div>
               <div className="xs muted">{teamText(i.team_min, i.team_max)}</div>
               <div className="row g8 wrap-row">
-                <ActionForm action={answerInvite} className="row g8"><input type="hidden" name="memberId" value={i.id} /><input type="hidden" name="answer" value="accept" /><Submit className="btn sm" pendingText="Joining…">Accept</Submit></ActionForm>
-                <ActionForm action={answerInvite} className="row g8"><input type="hidden" name="memberId" value={i.id} /><input type="hidden" name="answer" value="decline" /><Submit className="btn sm outline" pendingText="…">Decline</Submit></ActionForm>
+                <ActionForm action={answerInvite} className="row g8" flash><input type="hidden" name="memberId" value={i.id} /><input type="hidden" name="answer" value="accept" /><Submit className="btn sm" pendingText="Joining…">Accept</Submit></ActionForm>
+                <ActionForm action={answerInvite} className="row g8" flash><input type="hidden" name="memberId" value={i.id} /><input type="hidden" name="answer" value="decline" /><Submit className="btn sm outline" pendingText="…">Decline</Submit></ActionForm>
               </div>
             </div>
           ))}
@@ -95,7 +100,7 @@ export default async function MyEvents({ searchParams }: { searchParams: Promise
                   <div key={m.id} className="li" style={{ padding: '8px 12px' }} data-member={m.name ?? m.email}>
                     <span className="grow small wrap-anywhere">{m.name ?? m.email}{m.is_captain ? ' (captain)' : ''}{m.status === 'invited' ? <span className="xs muted"> · invited</span> : ''}{m.present ? ' ✓' : ''}</span>
                     {captain && !m.is_captain && live && (
-                      <ActionForm action={removeTeamMember} className="row g8"><input type="hidden" name="memberId" value={m.id} />
+                      <ActionForm action={removeTeamMember} className="row g8" flash><input type="hidden" name="memberId" value={m.id} />
                         <Submit className="btn text xs" pendingText="…">{m.status === 'invited' ? 'Cancel invite' : 'Remove'}</Submit></ActionForm>
                     )}
                   </div>
@@ -104,7 +109,7 @@ export default async function MyEvents({ searchParams }: { searchParams: Promise
             )}
 
             {captain && live && team && !closed && outstanding < e.team_max && (
-              <ActionForm action={inviteToTeam} className="row g8 wrap-row" resetOnSuccess>
+              <ActionForm action={inviteToTeam} className="row g8 wrap-row" resetOnSuccess flash>
                 <input type="hidden" name="regId" value={e.reg_id} />
                 <input className="input grow" type="email" name="email" required placeholder="teammate@college.edu" aria-label="Teammate’s email" style={{ minWidth: 0, flex: '1 1 180px' }} />
                 <Submit className="btn sm" pendingText="Sending…">Invite</Submit>
@@ -113,7 +118,7 @@ export default async function MyEvents({ searchParams }: { searchParams: Promise
 
             {captain && e.status === 'forming' && !closed && !e.pending && (
               e.price_paise === 0 ? (
-                <ActionForm action={submitTeam}>
+                <ActionForm action={submitTeam} flash>
                   <input type="hidden" name="regId" value={e.reg_id} />
                   <button className="btn block" type="submit" disabled={joined < e.team_min || full} data-submit>
                     {full ? 'Event is full' : joined < e.team_min ? `Submit team (need ${e.team_min - joined} more)` : 'Submit team'}
@@ -131,15 +136,17 @@ export default async function MyEvents({ searchParams }: { searchParams: Promise
                 </div>
               )
             )}
-            {e.pending && <p className="small soft">Payment pending — finish it from <Link href="/tickets" className="accent">My tickets</Link> (bank UPI) or wait a few minutes.</p>}
+            {e.pending && (e.utr_sent
+              ? <p className="small soft">UTR sent — we’ll confirm once the payment is seen in the fest’s account.</p>
+              : <p className="small soft">Payment in progress — finish it from <Link href="/tickets" className="accent">My tickets</Link> (bank UPI) or wait a few minutes. An unfinished payment is released after 15 minutes (30 for bank UPI).</p>)}
             {captain && e.paid && e.status === 'confirmed' && <p className="xs muted">Paid {rupees(e.price_paise)} + fee. Need to cancel? Ask the organizer for a refund.</p>}
 
             <div className="row g8 wrap-row">
               {!captain && live && !closed && (
-                <ActionForm action={leaveEventTeam} className="row g8"><input type="hidden" name="regId" value={e.reg_id} /><Submit className="btn sm outline" pendingText="…">Leave team</Submit></ActionForm>
+                <ActionForm action={leaveEventTeam} className="row g8" flash><input type="hidden" name="regId" value={e.reg_id} /><Submit className="btn sm outline" pendingText="…">Leave team</Submit></ActionForm>
               )}
               {captain && live && !e.paid && !e.pending && (e.status === 'forming' || !closed) && (
-                <ActionForm action={withdrawMyEntry} className="row g8"><input type="hidden" name="regId" value={e.reg_id} /><Submit className="btn sm outline" pendingText="…">Withdraw entry</Submit></ActionForm>
+                <ActionForm action={withdrawMyEntry} className="row g8" flash><input type="hidden" name="regId" value={e.reg_id} /><Submit className="btn sm outline" pendingText="…">Withdraw entry</Submit></ActionForm>
               )}
             </div>
           </section>

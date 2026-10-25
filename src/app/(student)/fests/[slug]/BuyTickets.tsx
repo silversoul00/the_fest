@@ -58,9 +58,11 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
   const single = !!(addonFor || registrationId);
   const maxQty = single ? 1 : Math.min(10, t?.left ?? 0);
   const q = t ? quote(t.price, qty, feeCfg, method) : null;
-  const done = (orderId: string) => {
+  const noun = registrationId ? 'entry' : 'ticket';
+  // `waiting`: a bank-UPI UTR was sent but the payment isn't seen yet — never say "confirmed" then
+  const done = (orderId: string, waiting = false) => {
     if (addonFor) { router.push(`/tickets/${addonFor}?addon=1`); router.refresh(); return; }
-    if (registrationId) { router.push('/my-events?paid=1'); router.refresh(); return; }
+    if (registrationId) { router.push(waiting ? '/my-events?utr=1' : '/my-events?paid=1'); router.refresh(); return; }
     router.push(`/tickets?order=${orderId}`);
   };
 
@@ -85,7 +87,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
         }
         const v = await post('/api/checkout/cashfree-verify', { orderId: r.orderId });
         if (v.paid) return done(r.orderId);
-        throw new Error('Payment not confirmed yet. If money was taken, your ticket appears in My Tickets within a few minutes.');
+        throw new Error(registrationId ? 'Payment not confirmed yet. If money was taken, your entry is confirmed in My events within a few minutes.' : 'Payment not confirmed yet. If money was taken, your ticket appears in My Tickets within a few minutes.');
       }
       if (r.mode === 'razorpay') {
         if (!(await loadScript('https://checkout.razorpay.com/v1/checkout.js', () => !!window.Razorpay)) || !window.Razorpay) throw new Error('Could not load the payment window. Check your connection.');
@@ -116,12 +118,12 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
   }
 
   if (types.length === 0) return <p className="small muted">No tickets listed yet.</p>;
-  if (upi) return <UpiPay upi={upi} onDone={() => done(upi.orderId)} />;
+  if (upi) return <UpiPay upi={upi} entry={!!registrationId} onDone={(status) => done(upi.orderId, status !== 'confirmed')} />;
 
   if (demo) {
     return (
       <div className="stack g12">
-        <div className="alert info">DEMO PAYMENT — no payment gateway is connected yet, so no money is charged. Your ticket will be real and scannable.</div>
+        <div className="alert info">DEMO PAYMENT — no payment gateway is connected yet, so no money is charged. {registrationId ? 'Your entry will be real.' : 'Your ticket will be real and scannable.'}</div>
         <div className="row between"><span className="soft">{qty} × {t?.name}</span><strong className="mono">{rupees(demo.amount)}</strong></div>
         {err && <div className="alert error">{err}</div>}
         <button className="btn block green" onClick={confirmDemo} disabled={busy}>{busy ? 'Confirming…' : `Pay ${rupees(demo.amount)} (demo)`}</button>
@@ -168,7 +170,7 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
           {isPaid && upiEnabled && !cardOff && (
             <div className="stack g8" role="radiogroup" aria-label="Payment method">
               <span className="label">Pay with</span>
-              {([['upi_direct', 'UPI to the fest', 'No payment fee · ticket confirmed in a few minutes'], ['gateway', 'Card / UPI checkout', `Instant ticket · +${rupees(gwQuote?.gatewayFee ?? 0)} payment charges`]] as const).map(([m, l, d]) => (
+              {([['upi_direct', 'UPI to the fest', `No payment fee · ${noun} confirmed in a few minutes`], ['gateway', 'Card / UPI checkout', `Instant ${noun} · +${rupees(gwQuote?.gatewayFee ?? 0)} payment charges`]] as const).map(([m, l, d]) => (
                 <label key={m} className="card tight row g12" style={{ cursor: 'pointer', borderColor: method === m ? 'var(--yellow)' : undefined, background: 'var(--black)' }}>
                   <input type="radio" name="method" checked={method === m} onChange={() => setMethod(m)} style={{ accentColor: 'var(--yellow)', width: 18, height: 18 }} />
                   <span className="grow"><strong>{l}</strong><span className="xs muted" style={{ display: 'block' }}>{d}</span></span>
@@ -218,7 +220,8 @@ export function BuyTickets({ festSlug, signedIn, isStudent, types, feeCfg, gatew
 }
 
 /* ─── Bank UPI: QR + "open UPI app" + paste UTR ─────────────────────── */
-export function UpiPay({ upi, onDone }: { upi: Upi; onDone: () => void }) {
+export function UpiPay({ upi, onDone, entry = false }: { upi: Upi; onDone: (status: 'confirmed' | 'waiting') => void; entry?: boolean }) {
+  const noun = entry ? 'entry' : 'ticket';
   const [qr, setQr] = useState('');
   const [utr, setUtr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -231,13 +234,13 @@ export function UpiPay({ upi, onDone }: { upi: Upi; onDone: () => void }) {
 
   async function submit() {
     setBusy(true); setErr('');
-    try { await post('/api/checkout/upi-utr', { orderId: upi.orderId, utr }); onDone(); }
+    try { const r = await post('/api/checkout/upi-utr', { orderId: upi.orderId, utr }); onDone(r.status === 'confirmed' ? 'confirmed' : 'waiting'); }
     catch (e) { setErr((e as Error).message); setBusy(false); }
   }
 
   return (
     <div className="stack g12">
-      <div className="alert info">Pay exactly <strong>{rupees(upi.amount)}</strong> — the paise identify your order. Paying a different amount delays your ticket.</div>
+      <div className="alert info">Pay exactly <strong>{rupees(upi.amount)}</strong> — the paise identify your order. Paying a different amount delays your {noun}.</div>
       <div className="stack g8" style={{ alignItems: 'center' }}>
         {qr ? <img src={qr} alt="UPI QR code" width={220} height={220} style={{ background: '#F5F0E8' }} /> : <div style={{ width: 220, height: 220, background: 'var(--mid)' }} />}
         <div className="mono small">{upi.vpa}</div>
@@ -250,7 +253,7 @@ export function UpiPay({ upi, onDone }: { upi: Upi; onDone: () => void }) {
       </label>
       <p className="xs muted">Find it in GPay / PhonePe / Paytm → payment history → this payment → “UPI transaction ID” or “UTR”.</p>
       {err && <div className="alert error" role="alert">{err}</div>}
-      <button className="btn block" onClick={submit} disabled={busy || utr.length !== 12}>{busy ? 'Checking…' : 'I’ve paid — confirm my ticket'}</button>
+      <button className="btn block" onClick={submit} disabled={busy || utr.length !== 12}>{busy ? 'Checking…' : `I’ve paid — confirm my ${noun}`}</button>
     </div>
   );
 }

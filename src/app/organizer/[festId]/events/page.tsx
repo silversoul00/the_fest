@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { sql } from '@/lib/db';
+import { takenLive } from '@/lib/holds';
 import { eventsReady, EVENTS_MISSING, pageAccess } from '@/lib/fest-access';
-import { dayLabel, rupees, time } from '@/lib/format';
+import { dayLabel, rupees, time, todayIST } from '@/lib/format';
 import { EVENT_CATEGORIES, EVENT_CATEGORY_LABEL, teamText } from '@/lib/event-format';
 import { ActionForm, Submit } from '@/components/forms';
 import { Empty } from '@/components/ui';
@@ -19,8 +20,11 @@ export default async function EventsTab({ params, searchParams }: { params: Prom
   const all = access.perms.has('events');
   const money = access.perms.has('money');  // no ₹ for roles without money (event heads, judges)
   const mine = [...access.headOf, ...access.judgeOf];
+  // Add-event date: the next fest day still ahead (today counts), or empty once the fest is over
+  const today = todayIST();
+  const nextDay = today > fest.ends_on ? '' : today > fest.starts_on ? today : fest.starts_on;
   const rows = all || mine.length ? await sql<Row[]>`
-    select e.id, e.title, e.category, e.starts_at, e.reg_deadline, e.team_min, e.team_max, e.price_paise, e.slots, tt.sold as taken, e.active,
+    select e.id, e.title, e.category, e.starts_at, e.reg_deadline, e.team_min, e.team_max, e.price_paise, e.slots, ${takenLive(sql)} as taken, e.active,
            (select count(*) from event_regs r where r.event_id = e.id and r.status in ('forming', 'confirmed'))::int as entries
     from events e join ticket_types tt on tt.id = e.ticket_type_id
     where e.fest_id = ${fest.id} ${all ? sql`` : sql`and e.id in ${sql(mine)}`}
@@ -60,7 +64,7 @@ export default async function EventsTab({ params, searchParams }: { params: Prom
           <ActionForm action={addFestEvent} resetOnSuccess>
             <input type="hidden" name="festId" value={fest.id} />
             <EventFields money festStart={fest.starts_on} festEnd={fest.ends_on}
-              v={{ title: '', category: 'cultural', date: fest.starts_on, start: '10:00', end: '', venue: '', rules: '', prize: '', team_min: 1, team_max: 1, price: 0, slots: 0, deadline_date: '', deadline_time: '', mixed_colleges: true, needs_ticket: false }} />
+              v={{ title: '', category: 'cultural', date: nextDay, start: '10:00', end: '', venue: '', rules: '', prize: '', team_min: 1, team_max: 1, price: 0, slots: 0, deadline_date: '', deadline_time: '', mixed_colleges: true, needs_ticket: false }} />
             <Submit className="btn">+ Add event</Submit>
           </ActionForm>
         </div>

@@ -12,6 +12,7 @@ import { catLabel, FestStatus } from '@/components/ui';
 import { BuyTickets } from './BuyTickets';
 import { isRenameNote } from '@/lib/fest-form';
 import { sql } from '@/lib/db';
+import { takenLive } from '@/lib/holds';
 import { eventsReady } from '@/lib/fest-access';
 import { EVENT_CATEGORIES, EVENT_CATEGORY_LABEL, feeText, isEventCategory, slotState, teamText } from '@/lib/event-format';
 
@@ -36,7 +37,7 @@ export default async function FestPage({ params, searchParams }: { params: Promi
   const [types, schedule, news] = await Promise.all([getTicketTypes(fest.id, 'entry'), getSchedule(fest.id), getAnnouncements(fest.id, 5)]);
   // v2.8 events (hidden ones never show)
   const events = (await eventsReady()) ? await sql<{ id: string; title: string; category: string; starts_at: Date; venue: string; team_min: number; team_max: number; price_paise: number; needs_ticket: boolean; slots: number; taken: number; reg_deadline: Date }[]>`
-    select e.id, e.title, e.category, e.starts_at, e.venue, e.team_min, e.team_max, e.price_paise, e.needs_ticket, e.slots, tt.sold as taken, e.reg_deadline
+    select e.id, e.title, e.category, e.starts_at, e.venue, e.team_min, e.team_max, e.price_paise, e.needs_ticket, e.slots, ${takenLive(sql)} as taken, e.reg_deadline
     from events e join ticket_types tt on tt.id = e.ticket_type_id where e.fest_id = ${fest.id} and e.active order by e.starts_at, e.title` : [];
   const cats = EVENT_CATEGORIES.filter((c) => events.some((e) => e.category === c));
   const pickedCat = isEventCategory(cat) && cats.includes(cat) ? cat : null;

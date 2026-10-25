@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { getUser } from '@/lib/auth';
 import { sql } from '@/lib/db';
+import { takenLive } from '@/lib/holds';
 import { eventsReady, festAccess } from '@/lib/fest-access';
 import { isUuid } from '@/lib/http';
 import { getFestBySlug } from '@/lib/queries';
@@ -23,7 +24,7 @@ export default async function EventDetail({ params }: { params: Promise<{ slug: 
   if ((fest.status === 'draft' || fest.status === 'review') && !runsIt && !user?.is_admin) notFound();
   const [e] = await sql<{ id: string; title: string; category: string; starts_at: Date; ends_at: Date | null; venue: string; rules: string; prize: string; team_min: number; team_max: number; price_paise: number; needs_ticket: boolean; mixed_colleges: boolean; slots: number; taken: number; reg_deadline: Date }[]>`
     select e.id, e.title, e.category, e.starts_at, e.ends_at, e.venue, e.rules, e.prize, e.team_min, e.team_max, e.price_paise, e.needs_ticket,
-           e.mixed_colleges, e.slots, tt.sold as taken, e.reg_deadline
+           e.mixed_colleges, e.slots, ${takenLive(sql)} as taken, e.reg_deadline
     from events e join ticket_types tt on tt.id = e.ticket_type_id where e.id = ${eventId} and e.fest_id = ${fest.id} and e.active`;
   if (!e) notFound();
   const [mine] = user ? await sql<{ status: string }[]>`

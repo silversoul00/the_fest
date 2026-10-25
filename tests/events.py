@@ -347,9 +347,10 @@ async def main():
         check('AC9 event head exporting another event → 404', r.status == 404, r.status)
         r = await hc.request.get(f'{B}/organizer/{NEON}/events/{bands}/export')
         rows = list(csv.DictReader(io.StringIO((await r.text()).lstrip('﻿'))))
-        members = int(q(f"select count(*) from event_members where event_id='{bands}' and status in ('joined','invited')"))
-        check('AC11 CSV: one row per member with team, status, email, college, paid, present', r.status == 200 and len(rows) == members
-              and set(['team', 'entry_status', 'email', 'college', 'paid_inr', 'present']) <= set(rows[0].keys()) and any(x['paid_inr'] for x in rows), (r.status, len(rows), members))
+        members = int(q(f"select count(*) from event_members where event_id='{bands}' and status = 'joined'"))
+        # fix round 1: joined members only; no ₹ column for an event head (no money permission) — tests/events_fix1.py checks the owner's
+        check('AC11 CSV: one row per joined member with team, status, email, college, present (no ₹ for the event head)', r.status == 200 and len(rows) == members
+              and set(['team', 'entry_status', 'email', 'college', 'present']) <= set(rows[0].keys()) and 'paid_inr' not in rows[0], (r.status, len(rows), members))
         await hp.goto(f'{B}/organizer/{NEON}/events/{bands}')
         price0 = q(f"select price_paise || '|' || slots || '|' || needs_ticket from events where id='{bands}'")
         await hp.evaluate("""() => { const f = document.querySelector('#edit-event form');

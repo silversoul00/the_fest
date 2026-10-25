@@ -1,5 +1,4 @@
 import 'server-only';
-import type postgres from 'postgres';
 import { sql } from './db';
 import { eventFees, feeConfig } from './payments';
 import { quote, type Method } from './pricing';
@@ -7,9 +6,7 @@ import { ticketCode } from './ticket-crypto';
 import { todayIST } from './format';
 import { checkEntryMembers } from './events';
 import { eventsReady } from './fest-access';
-
-const HOLD_MINUTES = 15;        // card/gateway checkout
-const UPI_HOLD_MINUTES = 30;    // bank UPI: time to pay and paste the UTR
+import { releaseExpiredHolds } from './holds';
 
 export class OrderError extends Error {}
 
@@ -143,19 +140,6 @@ export async function createOrder(input: { userId: string; ticketTypeId: string;
       returning id`;
     return { orderId: order.id, amount, fee: q.fee, gatewayFee: q.gatewayFee, festId: tt.fest_id, free, upiVpa: tt.upi_vpa };
   });
-}
-
-/** Release this ticket type's expired holds; returns seats freed. */
-async function releaseExpiredHolds(tx: postgres.TransactionSql, ticketTypeId: string) {
-  const expired = await tx<{ qty: number }[]>`
-    update orders set status = 'failed'
-    where ticket_type_id = ${ticketTypeId} and status = 'pending'
-      and (
-        (method <> 'upi_direct' and created_at < now() - make_interval(mins => ${HOLD_MINUTES}))
-        or (method = 'upi_direct' and utr is null and created_at < now() - make_interval(mins => ${UPI_HOLD_MINUTES}))
-      )
-    returning qty`;
-  return expired.reduce((a, r) => a + r.qty, 0);
 }
 
 /**
