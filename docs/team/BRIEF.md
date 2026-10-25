@@ -129,6 +129,15 @@ When Harshith gives a new instruction or makes a decision, add it here (with the
      ticket sales paused" note: dates, schedule and announcements visible; buying disabled; existing tickets and gate
      scanning keep working. Other non-public statuses (draft, first-time review of a never-approved fest) stay hidden as today.
 
+## Fest structure & events (Oct 25, 2026) — approved, building
+- Harshith: "Go for it" (with Claude's recommended picks). Fest → categories (fixed list: Cultural, Management, Technical,
+  Sports, Literary, Gaming, Other) → events (date/time, venue, rules, prize, solo/team with min–max size, fee: free-with-
+  ticket or paid, slots, deadline, mixed colleges allowed per event). Event heads/judges link to a specific event.
+- Decisions: platform fee **₹5 per paid event registration**; organizer chooses per event whether a fest ticket is needed;
+  students can leave a team before the deadline and captains can remove members; full events just show "Full" (no
+  waitlist in v1). Event entry via the same QR on a new "Event" scanner counter. Judging/results/certificates = part B.
+  Add v2.8 to both Supabase databases after tests pass (same pattern as before).
+
 ## Decided features (built)
 - Ticketing with signed QR codes, seat holds, gate scanning that admits each ticket once.
 - Organizer dashboard, schedule, volunteers, announcements, sponsors, CSV export.
